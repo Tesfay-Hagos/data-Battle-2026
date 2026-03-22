@@ -23,14 +23,17 @@ if "log" not in dir():
 # ── Resolve project root (works when run directly OR via exec()) ─────────────
 # When exec()'d from a notebook, __file__ is the caller's path, not ours.
 # We find the project root by searching upward for env_setup.py itself.
-_caller = Path(__file__).resolve()
-_PROJECT_ROOT = (
-    _caller.parent if _caller.name == "env_setup.py"
-    else next(
-        (p for p in _caller.parents if (p / "env_setup.py").exists()),
-        _caller.parent,
+try:
+    _caller = Path(__file__).resolve()
+    _PROJECT_ROOT = (
+        _caller.parent if _caller.name == "env_setup.py"
+        else next(
+            (p for p in _caller.parents if (p / "env_setup.py").exists()),
+            _caller.parent,
+        )
     )
-)
+except NameError:
+    _PROJECT_ROOT = Path.cwd()   # Colab / Jupyter cell: __file__ not defined
 
 # ── Detect runtime environment ───────────────────────────────────────────────
 IN_COLAB  = "google.colab" in sys.modules
