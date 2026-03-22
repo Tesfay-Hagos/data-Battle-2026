@@ -4,7 +4,9 @@
 # Usage:
 #   make install       Install all dependencies
 #   make notebook      Convert .py → .ipynb (all notebooks)
+#   make lab           Open JupyterLab with all notebooks
 #   make run-eda       Run EDA script directly as Python
+#   make sync          Two-way sync .py ↔ .ipynb
 #   make clean         Remove generated figures and .ipynb files
 #
 # Requires: jupytext  (converts percent-format .py to .ipynb)
@@ -36,6 +38,12 @@ notebook:
 $(NBDIR)/%.ipynb: $(NBDIR)/%.py
 	jupytext --to notebook --output $@ $<
 
+## ── lab: convert .py → .ipynb then open JupyterLab ─────────────────────────
+.PHONY: lab
+lab: notebook
+	@echo "Opening JupyterLab …"
+	.venv/bin/jupyter lab $(NBDIR)/
+
 ## ── run-eda: execute EDA script directly (no Jupyter needed) ────────────────
 .PHONY: run-eda
 run-eda:
@@ -66,6 +74,7 @@ help:
 	@echo "DataBattle 2026 — available make targets:"
 	@echo "  make install     Install Python dependencies"
 	@echo "  make notebook    Convert all .py notebooks → .ipynb"
+	@echo "  make lab         Convert + open JupyterLab"
 	@echo "  make run-eda     Run EDA script directly"
 	@echo "  make sync        Two-way sync .py ↔ .ipynb"
 	@echo "  make clean       Remove generated .ipynb and figures"

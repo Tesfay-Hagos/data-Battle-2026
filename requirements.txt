@@ -12,6 +12,7 @@ scipy>=1.11
 codecarbon>=2.3
 streamlit>=1.28
 jupytext>=1.15
+jupyterlab>=4.0
 jupyter>=1.0
 ipykernel>=6.0
 tqdm>=4.65
