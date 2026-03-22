@@ -46,7 +46,10 @@ warnings.filterwarnings("ignore")
 try:
     _root = Path(__file__).resolve().parents[1]
 except NameError:
-    _root = Path.cwd()           # notebook cell context (Colab / Kaggle)
+    # Notebook cell context: search cwd and parent for env_setup.py
+    _root = Path.cwd()
+    if not (_root / "env_setup.py").exists() and (_root.parent / "env_setup.py").exists():
+        _root = _root.parent
 exec(open(_root / "env_setup.py").read())
 
 log = logging.getLogger("eda")   # override with EDA-specific logger name
