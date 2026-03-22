@@ -14,12 +14,19 @@ REPO_DIR  = "/content/data-Battle-2026"
 
 # For private repos: add your token to Colab Secrets (key icon in left sidebar)
 # Secret name: GITHUB_TOKEN  — never paste tokens in code or chat
+_auth_url = REPO_URL
 try:
     from google.colab import userdata
-    _token = userdata.get("GITHUB_TOKEN")
-    _auth_url = REPO_URL.replace("https://", f"https://{_token}@")
-except Exception:
-    _auth_url = REPO_URL   # public repo or token not needed
+    _token = userdata.get("GITHUB_TOKEN")   # raises SecretNotFoundError if missing
+    if _token:
+        _auth_url = REPO_URL.replace("https://", f"https://{_token}@")
+        print("GitHub token loaded from Secrets.")
+    else:
+        print("WARNING: GITHUB_TOKEN secret is empty.")
+except Exception as _e:
+    print(f"WARNING: Could not load GITHUB_TOKEN from Colab Secrets ({_e}).\n"
+          "  → Open the 🔑 key icon in the left sidebar.\n"
+          "  → Check that 'Notebook access' is toggled ON for GITHUB_TOKEN.")
 
 if os.path.exists(f"{REPO_DIR}/.git"):
     print("Repo already cloned — pulling latest …")
