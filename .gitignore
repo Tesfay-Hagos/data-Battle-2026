@@ -1,0 +1,31 @@
+# ── Data (lives on Google Drive, never commit) ────────────────────────────
+data/
+*.csv
+*.parquet
+*.pkl
+*.h5
+
+# ── Generated outputs (Drive is source of truth) ─────────────────────────
+outputs/
+
+# ── Notebooks auto-generated from .py ────────────────────────────────────
+notebooks/*.ipynb
+notebooks/__pycache__/
+
+# ── Python ────────────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── OS / editors ──────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
