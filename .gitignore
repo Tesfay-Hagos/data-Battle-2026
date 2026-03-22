@@ -9,7 +9,6 @@ data/
 outputs/
 
 # ── Notebooks auto-generated from .py ────────────────────────────────────
-notebooks/*.ipynb
 notebooks/__pycache__/
 
 # ── Python ────────────────────────────────────────────────────────────────
