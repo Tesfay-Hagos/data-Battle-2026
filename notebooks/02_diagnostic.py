@@ -67,6 +67,8 @@ df["year"]      = df["date"].dt.year
 df["month"]     = df["date"].dt.month
 df["hour"]      = df["date"].dt.hour
 df["dayofweek"] = df["date"].dt.dayofweek
+# CSV stores booleans as strings — convert once so all downstream logic works
+df["icloud"] = df["icloud"].astype(str).str.lower() == "true"
 
 log.info(f"Total rows : {len(df):,}")
 log.info(f"Columns    : {list(df.columns)}")
