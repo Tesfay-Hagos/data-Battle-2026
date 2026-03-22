@@ -7,17 +7,24 @@
 # ## Step 1 — Clone or update the repo
 
 # %%
-import os
+import os, subprocess, sys
 
 REPO_URL  = "https://github.com/Tesfay-Hagos/data-Battle-2026.git"
 REPO_DIR  = "/content/data-Battle-2026"
 
-if os.path.exists(REPO_DIR):
+if os.path.exists(f"{REPO_DIR}/.git"):
     print("Repo already cloned — pulling latest …")
-    os.system(f"git -C {REPO_DIR} pull")
+    subprocess.run(["git", "-C", REPO_DIR, "pull"], check=True)
 else:
     print("Cloning repo …")
-    os.system(f"git clone {REPO_URL} {REPO_DIR}")
+    result = subprocess.run(["git", "clone", REPO_URL, REPO_DIR])
+    if result.returncode != 0:
+        raise RuntimeError(
+            "git clone failed. If the repo is private, run:\n"
+            "  from google.colab import userdata\n"
+            "  token = userdata.get('GITHUB_TOKEN')\n"
+            f"  !git clone https://{{token}}@github.com/Tesfay-Hagos/data-Battle-2026.git {REPO_DIR}"
+        )
 
 os.chdir(REPO_DIR)
 print(f"Working directory: {os.getcwd()}")
@@ -26,7 +33,7 @@ print(f"Working directory: {os.getcwd()}")
 # ## Step 2 — Install dependencies
 
 # %%
-os.system("pip install -q -r requirements.txt")
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"], check=True)
 print("Dependencies installed.")
 
 # %% [markdown]
