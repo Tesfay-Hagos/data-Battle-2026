@@ -42,8 +42,9 @@ $(NBDIR)/%.ipynb: $(NBDIR)/%.py
 ## ── lab: convert .py → .ipynb then open JupyterLab ─────────────────────────
 .PHONY: lab
 lab: notebook
+	@$(PYTHON) -m ipykernel install --user --name=databattle2026 --display-name="DataBattle 2026" --quiet 2>/dev/null || true
 	@echo "Opening JupyterLab …"
-	$(JUPYTER) lab $(NBDIR)/
+	$(JUPYTER) lab --notebook-dir=.
 
 ## ── run-eda: execute EDA script directly (no Jupyter needed) ────────────────
 .PHONY: run-eda
