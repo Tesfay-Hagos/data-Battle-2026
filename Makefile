@@ -13,8 +13,9 @@
 # Install:  pip install jupytext
 # ============================================================
 
-PYTHON    := .venv/bin/python3
-PIP       := .venv/bin/pip
+PYTHON    := ../.venv/bin/python3
+PIP       := ../.venv/bin/pip
+JUPYTER   := ../.venv/bin/jupyter
 NBDIR     := notebooks
 FIGDIR    := outputs/figures
 
@@ -30,19 +31,19 @@ notebook:
 	@echo "Converting .py → .ipynb …"
 	@for f in $(NBDIR)/*.py; do \
 		echo "  Converting $$f …"; \
-		jupytext --to notebook --output "$${f%.py}.ipynb" "$$f"; \
+		$(PYTHON) -m jupytext --to notebook --output "$${f%.py}.ipynb" "$$f"; \
 	done
 	@echo "Done. Open notebooks/ in JupyterLab."
 
 ## ── single target: convert a specific notebook ──────────────────────────────
 $(NBDIR)/%.ipynb: $(NBDIR)/%.py
-	jupytext --to notebook --output $@ $<
+	$(PYTHON) -m jupytext --to notebook --output $@ $<
 
 ## ── lab: convert .py → .ipynb then open JupyterLab ─────────────────────────
 .PHONY: lab
 lab: notebook
 	@echo "Opening JupyterLab …"
-	.venv/bin/jupyter lab $(NBDIR)/
+	$(JUPYTER) lab $(NBDIR)/
 
 ## ── run-eda: execute EDA script directly (no Jupyter needed) ────────────────
 .PHONY: run-eda
@@ -57,7 +58,7 @@ run-eda:
 sync:
 	@for f in $(NBDIR)/*.ipynb; do \
 		echo "  Syncing $$f …"; \
-		jupytext --sync "$$f"; \
+		$(PYTHON) -m jupytext --sync "$$f"; \
 	done
 
 ## ── clean: remove generated outputs ─────────────────────────────────────────
