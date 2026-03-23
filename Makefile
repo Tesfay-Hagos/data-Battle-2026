@@ -74,8 +74,10 @@ push-drive:
 		echo "  Converting $$(basename $$f) …"; \
 		$(PYTHON) -m jupytext --to notebook --output "$$nb" "$$f"; \
 	done
-	@echo "Uploading to Google Drive …"
+	@echo "Uploading notebooks to Google Drive …"
 	@rclone copy /tmp/db2026_nb $(DRIVE_NB) --progress
+	@echo "Uploading env_setup.py to Google Drive …"
+	@rclone copyto env_setup.py gdrive:MyDrive/databattle2026/env_setup.py
 	@echo "Done. Open from Google Drive → databattle2026/notebooks/"
 
 ## ── clean: remove generated outputs ─────────────────────────────────────────

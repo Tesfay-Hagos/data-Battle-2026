@@ -15,6 +15,7 @@
 #   PART 8 — Final Feature List    (ready for model training)
 
 # %% Imports & environment
+import sys
 import warnings
 import logging
 from pathlib import Path
@@ -30,13 +31,27 @@ from plotly.subplots import make_subplots
 
 warnings.filterwarnings("ignore")
 
-try:
-    _root = Path(__file__).resolve().parents[1]
-except NameError:
-    _root = Path.cwd()
-    if not (_root / "env_setup.py").exists() and (_root.parent / "env_setup.py").exists():
-        _root = _root.parent
-exec(open(_root / "env_setup.py").read())
+# ── Bootstrap: load env_setup.py without needing GitHub ─────────────────────
+if "google.colab" in sys.modules:
+    # Colab: mount Drive and load env_setup.py directly from there
+    from google.colab import drive
+    drive.mount("/content/drive", force_remount=False)
+    _env = Path("/content/drive/MyDrive/databattle2026/env_setup.py")
+    if not _env.exists():
+        raise FileNotFoundError(
+            f"env_setup.py not found at {_env}\n"
+            "  → Run  make push-drive  from your local machine first."
+        )
+    exec(open(_env).read())
+else:
+    # Local / Kaggle: find env_setup.py relative to this file
+    try:
+        _root = Path(__file__).resolve().parents[1]
+    except NameError:
+        _root = Path.cwd()
+        if not (_root / "env_setup.py").exists() and (_root.parent / "env_setup.py").exists():
+            _root = _root.parent
+    exec(open(_root / "env_setup.py").read())
 
 log = logging.getLogger("final_eda")
 
