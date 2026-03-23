@@ -19,7 +19,7 @@ PIP       := ../.venv/bin/pip
 JUPYTER   := ../.venv/bin/jupyter
 NBDIR     := notebooks
 FIGDIR    := outputs/figures
-DRIVE_NB  := gdrive:MyDrive/databattle2026/notebooks
+DRIVE_NB  := gdrive:databattle2026/notebooks
 
 ## ── install: install all Python dependencies ────────────────────────────────
 .PHONY: install
@@ -77,7 +77,7 @@ push-drive:
 	@echo "Uploading notebooks to Google Drive …"
 	@rclone copy /tmp/db2026_nb $(DRIVE_NB) --progress
 	@echo "Uploading env_setup.py to Google Drive …"
-	@rclone copyto env_setup.py gdrive:MyDrive/databattle2026/env_setup.py
+	@rclone copyto env_setup.py gdrive:databattle2026/env_setup.py
 	@echo "Done. Open from Google Drive → databattle2026/notebooks/"
 
 ## ── clean: remove generated outputs ─────────────────────────────────────────
