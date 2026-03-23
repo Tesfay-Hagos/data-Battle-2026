@@ -7,6 +7,7 @@
 #   make lab           Open JupyterLab with all notebooks
 #   make run-eda       Run EDA script directly as Python
 #   make sync          Two-way sync .py ↔ .ipynb
+#   make push-drive    Convert + push all notebooks to Google Drive
 #   make clean         Remove generated figures and .ipynb files
 #
 # Requires: jupytext  (converts percent-format .py to .ipynb)
@@ -18,6 +19,7 @@ PIP       := ../.venv/bin/pip
 JUPYTER   := ../.venv/bin/jupyter
 NBDIR     := notebooks
 FIGDIR    := outputs/figures
+DRIVE_NB  := gdrive:MyDrive/databattle2026/notebooks
 
 ## ── install: install all Python dependencies ────────────────────────────────
 .PHONY: install
@@ -62,6 +64,20 @@ sync:
 		$(PYTHON) -m jupytext --sync "$$f"; \
 	done
 
+## ── push-drive: convert .py → .ipynb locally then upload to Google Drive ────
+.PHONY: push-drive
+push-drive:
+	@echo "Converting .py → .ipynb …"
+	@mkdir -p /tmp/db2026_nb
+	@for f in $(NBDIR)/*.py; do \
+		nb="/tmp/db2026_nb/$$(basename $${f%.py}.ipynb)"; \
+		echo "  Converting $$(basename $$f) …"; \
+		$(PYTHON) -m jupytext --to notebook --output "$$nb" "$$f"; \
+	done
+	@echo "Uploading to Google Drive …"
+	@rclone copy /tmp/db2026_nb $(DRIVE_NB) --progress
+	@echo "Done. Open from Google Drive → databattle2026/notebooks/"
+
 ## ── clean: remove generated outputs ─────────────────────────────────────────
 .PHONY: clean
 clean:
@@ -79,5 +95,6 @@ help:
 	@echo "  make lab         Convert + open JupyterLab"
 	@echo "  make run-eda     Run EDA script directly"
 	@echo "  make sync        Two-way sync .py ↔ .ipynb"
+	@echo "  make push-drive  Convert + push all notebooks to Google Drive"
 	@echo "  make clean       Remove generated .ipynb and figures"
 	@echo ""
