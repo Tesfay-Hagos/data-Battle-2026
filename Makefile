@@ -55,6 +55,13 @@ run-eda:
 	$(PYTHON) $(NBDIR)/01_eda.py
 	@echo "Figures saved to $(FIGDIR)/"
 
+## ── run-final-eda: run 03_final_eda_and_features.py without opening any plots
+.PHONY: run-final-eda
+run-final-eda:
+	@echo "Running final EDA (no plot windows) …"
+	MPLBACKEND=Agg $(PYTHON) $(NBDIR)/03_final_eda_and_features.py
+	@echo "Done. Figures saved to outputs/figures/"
+
 ## ── sync: two-way sync .py ↔ .ipynb (keeps both up to date) ────────────────
 ## Useful during development: edit the .ipynb, sync back to .py
 .PHONY: sync
@@ -95,7 +102,8 @@ help:
 	@echo "  make install     Install Python dependencies"
 	@echo "  make notebook    Convert all .py notebooks → .ipynb"
 	@echo "  make lab         Convert + open JupyterLab"
-	@echo "  make run-eda     Run EDA script directly"
+	@echo "  make run-eda       Run 01_eda.py directly"
+	@echo "  make run-final-eda Run 03_final_eda_and_features.py (no plot windows)"
 	@echo "  make sync        Two-way sync .py ↔ .ipynb"
 	@echo "  make push-drive  Convert + push all notebooks to Google Drive"
 	@echo "  make clean       Remove generated .ipynb and figures"

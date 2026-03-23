@@ -196,7 +196,7 @@ SENTINEL_FILL = {
     "cg_count_10min"          : 1,
     "cg_count_15min"          : 1,
     "cg_count_30min"          : 1,
-    "rolling_mean_mag_10min"  : df_cg["amp_magnitude"].median(),
+    "rolling_mean_mag_10min"  : df_cg["amplitude"].abs().median(),
     "rolling_pos_ratio_10min" : 0,
     "rolling_mean_dist_10min" : df_cg["dist"].median(),
     "silence_over_10min"      : 0,
