@@ -71,21 +71,23 @@ sync:
 		$(PYTHON) -m jupytext --sync "$$f"; \
 	done
 
-## ── push-drive: convert .py → .ipynb locally then upload to Google Drive ────
+## ── push-drive: convert .py → .ipynb then upload to Google Drive ────────────
 .PHONY: push-drive
-push-drive:
-	@echo "Converting .py → .ipynb …"
-	@mkdir -p /tmp/db2026_nb
-	@for f in $(NBDIR)/*.py; do \
-		nb="/tmp/db2026_nb/$$(basename $${f%.py}.ipynb)"; \
-		echo "  Converting $$(basename $$f) …"; \
-		$(PYTHON) -m jupytext --to notebook --output "$$nb" "$$f"; \
-	done
+push-drive: notebook
 	@echo "Uploading notebooks to Google Drive …"
-	@rclone copy /tmp/db2026_nb $(DRIVE_NB) --progress
+	@rclone copy $(NBDIR) $(DRIVE_NB) --include "*.ipynb" --progress
 	@echo "Uploading env_setup.py to Google Drive …"
 	@rclone copyto env_setup.py gdrive:databattle2026/env_setup.py
 	@echo "Done. Open from Google Drive → databattle2026/notebooks/"
+
+## ── pull-drive: pull notebooks (with outputs) + figures from Google Drive ────
+.PHONY: pull-drive
+pull-drive:
+	@echo "Pulling notebooks from Google Drive …"
+	@rclone copy $(DRIVE_NB) $(NBDIR) --include "*.ipynb" --progress
+	@echo "Pulling figures from Google Drive …"
+	@rclone copy gdrive:databattle2026/outputs/figures $(FIGDIR) --progress
+	@echo "Done. Outputs synced to outputs/figures/"
 
 ## ── clean: remove generated outputs ─────────────────────────────────────────
 .PHONY: clean
@@ -106,5 +108,6 @@ help:
 	@echo "  make run-final-eda Run 03_final_eda_and_features.py (no plot windows)"
 	@echo "  make sync        Two-way sync .py ↔ .ipynb"
 	@echo "  make push-drive  Convert + push all notebooks to Google Drive"
+	@echo "  make pull-drive  Pull notebooks (with outputs) + figures from Drive"
 	@echo "  make clean       Remove generated .ipynb and figures"
 	@echo ""

@@ -55,7 +55,7 @@ else:
 
 log = logging.getLogger("final_eda")
 
-PALETTE = {"True": "#E74C3C", "False": "#3498DB"}
+PALETTE = {True: "#E74C3C", False: "#3498DB"}
 AP_COLORS = {
     "Ajaccio":  "#E74C3C",
     "Bastia":   "#3498DB",
@@ -88,12 +88,32 @@ df_inside  = df[df["airport_alert_id"].notna()].copy()   # 56,599 labeled rows
 df_outside = df[df["airport_alert_id"].isna()].copy()    # 450,472 context rows
 df_cg      = df_inside[df_inside["icloud"] == False].copy()  # CG only = model input
 
+# ── TARGET DTYPE NORMALISATION ───────────────────────────────────────────────
+# Normalise explicitly so behaviour is predictable across all pandas versions.
+df_cg["is_last_lightning_cloud_ground"] = (
+    df_cg["is_last_lightning_cloud_ground"]
+    .map({True: True, False: False, 1: True, 0: False,
+          "True": True, "False": False, "true": True, "false": False})
+    .astype(bool)
+)
+df_inside["is_last_lightning_cloud_ground"] = (
+    df_inside["is_last_lightning_cloud_ground"]
+    .map({True: True, False: False, 1: True, 0: False,
+          "True": True, "False": False})
+    .astype(bool)
+)
+assert df_cg["is_last_lightning_cloud_ground"].sum() > 0, \
+    "No True labels found — check source data"
+print(f"✅ Target dtype : {df_cg['is_last_lightning_cloud_ground'].dtype}")
+print(f"✅ True count   : {df_cg['is_last_lightning_cloud_ground'].sum():,}")
+print(f"✅ False count  : {(~df_cg['is_last_lightning_cloud_ground']).sum():,}")
+
 log.info(f"Total rows          : {len(df):,}")
 log.info(f"Inside zone (labeled): {len(df_inside):,}")
 log.info(f"Outside zone (context): {len(df_outside):,}")
 log.info(f"CG strikes (train)  : {len(df_cg):,}")
 log.info(f"Airports            : {sorted(df['airport'].dropna().unique())}")
-log.info(f"True segments       : {(df_cg['is_last_lightning_cloud_ground']=='True').sum():,}")
+log.info(f"True segments       : {df_cg['is_last_lightning_cloud_ground'].sum():,}")
 
 # %% [markdown]
 # ---
@@ -104,9 +124,9 @@ seg_stats = df_cg.groupby("segment_key").agg(
     airport      = ("airport", "first"),
     n_strikes    = ("lightning_id", "count"),
     n_true       = ("is_last_lightning_cloud_ground",
-                    lambda x: (x == "True").sum()),
+                    lambda x: x.sum()),
     n_false      = ("is_last_lightning_cloud_ground",
-                    lambda x: (x == "False").sum()),
+                    lambda x: (~x).sum()),
     duration_min = ("date",
                     lambda x: (x.max()-x.min()).total_seconds()/60),
     date_start   = ("date", "min"),
@@ -125,6 +145,24 @@ print(f"Total airports            : {seg_stats['airport'].nunique()}")
 print(f"\nStrikes per segment:")
 print(seg_stats["n_strikes"].describe().round(1))
 
+# %% VERIFICATION — must pass before continuing
+assert (seg_stats["n_true"] == 1).all(), (
+    f"FAIL: {(seg_stats['n_true'] != 1).sum()} segments do not have exactly 1 True.\n"
+    f"Distribution:\n{seg_stats['n_true'].value_counts()}"
+)
+assert seg_stats["airport"].nunique() == 5, \
+    f"Expected 5 airports, got {seg_stats['airport'].nunique()}"
+assert len(seg_stats) >= 700, \
+    f"Expected ~769 segments, got {len(seg_stats)}"
+
+print("=" * 50)
+print("✅ VERIFICATION PASSED")
+print(f"   Segments   : {len(seg_stats)}")
+print(f"   All 1 True : {(seg_stats['n_true']==1).all()}")
+print(f"   Airports   : {seg_stats['airport'].nunique()}")
+print(f"   True labels: {seg_stats['n_true'].sum():,}")
+print("=" * 50)
+
 # %% 1B: Visualise data structure
 fig, axes = plt.subplots(1, 4, figsize=(22, 5))
 
@@ -140,7 +178,7 @@ axes[0].pie(
 axes[0].set_title("P1 · Data Partition\n(labeled vs context rows)")
 
 # Bar: True label count per airport
-ap_true = df_cg[df_cg["is_last_lightning_cloud_ground"]=="True"]\
+ap_true = df_cg[df_cg["is_last_lightning_cloud_ground"]]\
     .groupby("airport").size().sort_values(ascending=False)
 axes[1].bar(ap_true.index, ap_true.values,
             color=[AP_COLORS.get(a,"gray") for a in ap_true.index],
@@ -212,8 +250,8 @@ print(f"\nSentinel fill values defined for {len(SENTINEL_FILL)} lag features.")
 # ## PART 2 — Target Analysis
 
 # %% 2A: Class imbalance
-pos = (df_cg["is_last_lightning_cloud_ground"] == "True").sum()
-neg = (df_cg["is_last_lightning_cloud_ground"] == "False").sum()
+pos = df_cg["is_last_lightning_cloud_ground"].sum()
+neg = (~df_cg["is_last_lightning_cloud_ground"]).sum()
 ratio = neg // pos
 
 print(f"\n=== TARGET ANALYSIS ===")
@@ -233,7 +271,7 @@ from sklearn.metrics import (
     f1_score, roc_auc_score, brier_score_loss,
     precision_score, recall_score, confusion_matrix
 )
-y_true = (df_cg["is_last_lightning_cloud_ground"] == "True").astype(int)
+y_true = df_cg["is_last_lightning_cloud_ground"].astype(int)
 y_rule = df_cg["is_last_cg_rule"]
 
 rule_f1    = f1_score(y_true, y_rule, zero_division=0)
@@ -343,7 +381,7 @@ plt.show()
 
 # %% 3B: Amplitude sign analysis
 print("\n=== AMPLITUDE SIGN ANALYSIS ===")
-for lbl in ["True", "False"]:
+for lbl in [True, False]:
     sub = df_cg[df_cg["is_last_lightning_cloud_ground"]==lbl]
     pos_pct = (sub["amplitude"] > 0).mean() * 100
     neg_pct = (sub["amplitude"] < 0).mean() * 100
@@ -390,7 +428,7 @@ for i, v in enumerate([icloud_dist.get(False,0), icloud_dist.get(True,0)]):
 # Year distribution (temporal coverage)
 year_dist = df_cg.groupby(["year","is_last_lightning_cloud_ground"]).size().unstack(fill_value=0)
 year_dist.plot(kind="bar", ax=axes[1],
-               color=[PALETTE["False"], PALETTE["True"]],
+               color=[PALETTE[False], PALETTE[True]],
                edgecolor="white", alpha=0.85)
 axes[1].set_title("P3 · Strikes per Year\n(Temporal coverage check)")
 axes[1].set_xlabel("Year")
@@ -434,12 +472,12 @@ axes[0].set_title("P4 · Position of Strike in Segment\n(True should peak near 1
 axes[0].legend(title="Last CG?")
 
 # rank_rev_cg — True should be 0
-rank_rev_true  = df_cg[df_cg["is_last_lightning_cloud_ground"]=="True"]["rank_rev_cg"]
-rank_rev_false = df_cg[df_cg["is_last_lightning_cloud_ground"]=="False"]["rank_rev_cg"]
+rank_rev_true  = df_cg[df_cg["is_last_lightning_cloud_ground"]]["rank_rev_cg"]
+rank_rev_false = df_cg[~df_cg["is_last_lightning_cloud_ground"]]["rank_rev_cg"]
 axes[1].hist(rank_rev_false.clip(0,20), bins=20, alpha=0.6,
-             color=PALETTE["False"], label="False", density=True)
+             color=PALETTE[False], label="False", density=True)
 axes[1].hist(rank_rev_true.clip(0,20),  bins=20, alpha=0.8,
-             color=PALETTE["True"],  label="True",  density=True)
+             color=PALETTE[True],  label="True",  density=True)
 axes[1].set_xlabel("Reverse rank (0 = chronologically last CG strike)")
 axes[1].set_ylabel("Density")
 axes[1].set_title("P4 · rank_rev_cg Distribution\n(True = always 0 after fix)")
@@ -466,7 +504,13 @@ save_to_drive(fig, FIG_DIR / "p4_storm_lifecycle_timing.png")
 plt.show()
 
 # %% 4C: Biarritz storm #1 — the clearest example of storm decay pattern
-biarritz_1 = df_cg[df_cg["segment_key"]=="Biarritz_1"].sort_values("date").copy()
+# Debug: find the actual Biarritz segment keys available in df_cg
+_biarritz_keys = sorted(df_cg[df_cg["airport"]=="Biarritz"]["segment_key"].unique())
+print(f"Biarritz segment keys in df_cg: {_biarritz_keys}")
+_biarritz_key = _biarritz_keys[0] if _biarritz_keys else "Biarritz_1.0"
+print(f"Using key: {_biarritz_key}")
+biarritz_1 = df_cg[df_cg["segment_key"]==_biarritz_key].sort_values("date").copy()
+print(f"Biarritz_1 rows: {len(biarritz_1)}, True rows: {biarritz_1['is_last_lightning_cloud_ground'].sum()}")
 biarritz_1["minutes"] = (
     biarritz_1["date"] - biarritz_1["date"].min()
 ).dt.total_seconds() / 60
@@ -477,17 +521,17 @@ fig.suptitle("P4 · Storm Lifecycle — Biarritz Alert #1\n"
              "The textbook example of storm decay", fontsize=13)
 
 # Strike timeline: dist over time
-colors = ["#E74C3C" if t=="True" else "#3498DB"
+colors = ["#E74C3C" if t else "#3498DB"
           for t in biarritz_1["is_last_lightning_cloud_ground"]]
 sizes  = (biarritz_1["maxis"].abs() + 0.1) * 40
 axes[0].scatter(biarritz_1["minutes"], biarritz_1["dist"],
                 c=colors, s=sizes, alpha=0.8,
                 edgecolors="white", lw=0.8, zorder=3)
-true_row = biarritz_1[biarritz_1["is_last_lightning_cloud_ground"]=="True"]
+true_row = biarritz_1[biarritz_1["is_last_lightning_cloud_ground"]]
 axes[0].scatter(true_row["minutes"], true_row["dist"],
-                s=400, marker="★", color="gold",
+                s=400, marker="*", color="gold",
                 edgecolors="black", lw=1, zorder=5,
-                label="★ Last CG (True)")
+                label="* Last CG (True)")
 axes[0].axhline(20, color="black", linestyle="--",
                 alpha=0.4, label="20km alert boundary")
 axes[0].set_ylabel("Distance from airport (km)")
@@ -499,12 +543,13 @@ for _, row in biarritz_1.iterrows():
     color = "#E74C3C" if row["amplitude"] < 0 else "#2ECC71"
     axes[1].bar(row["minutes"], abs(row["amplitude"]),
                 width=0.5, color=color, alpha=0.8)
-axes[1].axvline(true_row["minutes"].values[0],
-                color="gold", linewidth=2, linestyle="--",
-                label="★ Last CG strike")
+if len(true_row) > 0:
+    axes[1].axvline(true_row["minutes"].values[0],
+                    color="gold", linewidth=2, linestyle="--",
+                    label="* Last CG strike")
 axes[1].set_ylabel("|Amplitude| (kA)")
 axes[1].set_title("Amplitude magnitude over time  "
-                  "(🔴 negative CG = normal  🟢 positive CG = decay signal)")
+                  "(red=negative CG=normal  green=positive CG=decay signal)")
 axes[1].legend()
 
 # Inter-strike gap over time
@@ -513,9 +558,10 @@ axes[2].bar(gap_data["minutes"], gap_data["gap_min"],
             width=0.4, color="#3498DB", alpha=0.8, label="Gap (min)")
 axes[2].axhline(30, color="#E74C3C", linestyle="--",
                 linewidth=1.5, label="30 min silence threshold")
-axes[2].axvline(true_row["minutes"].values[0],
-                color="gold", linewidth=2, linestyle="--",
-                label="★ Last CG strike")
+if len(true_row) > 0:
+    axes[2].axvline(true_row["minutes"].values[0],
+                    color="gold", linewidth=2, linestyle="--",
+                    label="* Last CG strike")
 axes[2].set_xlabel("Minutes since alert start")
 axes[2].set_ylabel("Gap since previous CG strike (min)")
 axes[2].set_title("Inter-strike silence — 29-min gap before storm weakly resumes")
@@ -615,13 +661,13 @@ for ax, seg_id in zip(axes.flatten(), sample_segs):
         seg["date"] - seg["date"].min()
     ).dt.total_seconds() / 60
 
-    colors_s = ["#E74C3C" if t == "True" else "#3498DB"
+    colors_s = ["#E74C3C" if t else "#3498DB"
                 for t in seg["is_last_lightning_cloud_ground"]]
     ax.scatter(seg["minutes"], seg["dist"],
                c=colors_s, s=60, alpha=0.8,
                edgecolors="white", lw=0.5)
 
-    true_row = seg[seg["is_last_lightning_cloud_ground"] == "True"]
+    true_row = seg[seg["is_last_lightning_cloud_ground"]]
     if len(true_row):
         ax.scatter(true_row["minutes"], true_row["dist"],
                    s=250, marker="*", color="gold",
@@ -863,7 +909,7 @@ df_cg["airport_cat"] = df_cg["airport"].astype("category")
 # Airport target encoding (compute on training fold only in CV)
 # Here we compute globally for EDA only — recompute per fold in model
 airport_pos_rate = df_cg.groupby("airport")["is_last_lightning_cloud_ground"]\
-    .apply(lambda x: (x=="True").mean())
+    .mean()
 df_cg["airport_target_enc"] = df_cg["airport"].map(airport_pos_rate)
 
 # ── GROUP K: Outside-zone context features (vectorised) ─────────────────────
@@ -879,7 +925,7 @@ df_outside_cg = df_outside_cg.sort_values(["airport", "date"])
 def _outer_rolling(g):
     """Rolling 10-min CG count for one airport's outer ring."""
     return (
-        g.set_index("date")["amp_magnitude"]
+        g.set_index("date")["amplitude"]
         .rolling("10min").count()
         .rename("outer_ring_cg_10min")
         .reset_index()
@@ -896,7 +942,9 @@ outer_agg = (
 )
 
 # Merge onto inside-zone CG strikes by airport + nearest date (within 10 min)
-df_cg = df_cg.sort_values(["airport", "date"])
+# merge_asof requires the 'on' key (date) to be globally sorted — NOT by [airport, date]
+df_cg = df_cg.sort_values("date").reset_index(drop=True)
+outer_agg = outer_agg.sort_values("date").reset_index(drop=True)
 df_cg = pd.merge_asof(
     df_cg,
     outer_agg[["airport", "date", "outer_ring_cg_10min"]],
@@ -905,6 +953,7 @@ df_cg = pd.merge_asof(
     direction="backward",
     tolerance=pd.Timedelta("10min"),
 )
+df_cg = df_cg.sort_values(["segment_key", "date"]).reset_index(drop=True)
 df_cg["outer_ring_cg_10min"] = df_cg["outer_ring_cg_10min"].fillna(0)
 # Restore segment-level sort for downstream code
 df_cg = df_cg.sort_values(["segment_key", "date"])
@@ -988,7 +1037,7 @@ plt.show()
 from scipy import stats
 
 print("\n=== FEATURE SIGNAL STRENGTH (correlation with target) ===")
-y_binary = (df_cg["is_last_lightning_cloud_ground"]=="True").astype(int)
+y_binary = df_cg["is_last_lightning_cloud_ground"].astype(int)
 signal_scores = {}
 for feat in ENGINEERED_FEATURES:
     try:
