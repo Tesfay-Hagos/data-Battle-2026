@@ -80,13 +80,15 @@ df["dayofweek"] = df["date"].dt.dayofweek
 # The true segment = one storm at one airport = (airport × airport_alert_id).
 df["segment_key"] = (
     df["airport"].astype(str) + "_" +
-    df["airport_alert_id"].astype(str)
+    df["airport_alert_id"].astype("Int64").astype(str)
+    # Int64 (nullable) handles NaN rows without crashing;
+    # produces "Biarritz_1" not "Biarritz_1.0"
 )
 
 # Partition
-df_inside  = df[df["airport_alert_id"].notna()].copy()   # 56,599 labeled rows
-df_outside = df[df["airport_alert_id"].isna()].copy()    # 450,472 context rows
-df_cg      = df_inside[df_inside["icloud"] == False].copy()  # CG only = model input
+df_inside  = df[df["airport_alert_id"].notna()].copy()   # 56,599 rows — ALL CG, no IC (confirmed)
+df_outside = df[df["airport_alert_id"].isna()].copy()    # 450,472 rows — outside-20km CG + ALL IC strikes
+df_cg      = df_inside[df_inside["icloud"] == False].copy()  # CG only = 56,599 rows (= df_inside, IC never has alert_id)
 
 # ── TARGET DTYPE NORMALISATION ───────────────────────────────────────────────
 # Normalise explicitly so behaviour is predictable across all pandas versions.
@@ -227,12 +229,8 @@ SENTINEL_FILL = {
     "dist_delta"              : 0,      # no movement info — neutral
     "amp_delta"               : 0,      # no change info — neutral
     "mag_delta"               : 0,
-    "dx"                      : 0,
-    "dy"                      : 0,
     "storm_speed"             : 0,
-    "cg_count_5min"           : 1,      # only 1 strike known
-    "cg_count_10min"          : 1,
-    "cg_count_15min"          : 1,
+    "cg_count_10min"          : 1,      # only 1 strike known
     "cg_count_30min"          : 1,
     "rolling_mean_mag_10min"  : df_cg["amplitude"].abs().median(),
     "rolling_pos_ratio_10min" : 0,
@@ -976,7 +974,7 @@ ENGINEERED_FEATURES = [
     # A: Amplitude decomposition
     "amplitude", "amp_magnitude", "amp_is_positive",
     # B: Segment aggregations
-    "seg_size_cg", "seg_mean_amp", "seg_std_amp",
+    "seg_size_cg", "seg_mean_amp",
     "seg_mean_mag", "seg_duration_min", "seg_mean_dist",
     "seg_pos_cg_ratio",
     # C: Position
@@ -984,7 +982,7 @@ ENGINEERED_FEATURES = [
     # D: Lag/delta
     "time_since_prev", "dist_delta", "amp_delta", "mag_delta",
     # E: Rolling
-    "cg_count_5min", "cg_count_10min", "cg_count_30min",
+    "cg_count_10min", "cg_count_30min",
     "rolling_mean_mag_10min", "rolling_pos_ratio_10min",
     "rolling_mean_dist_10min",
     # F: Cartesian
@@ -1087,7 +1085,7 @@ FINAL_FEATURES = {
     "Segment context": [
         "seg_size_cg",        # how many CG strikes in this storm so far
         "seg_mean_mag",       # average amplitude magnitude of storm
-        "seg_std_amp",        # variability of amplitude — erratic = weakening
+        # seg_std_amp removed — r=0.921 with seg_mean_mag, redundant
         "seg_duration_min",   # how long storm has been active
         "seg_mean_dist",      # where storm is centered relative to airport
         "seg_pos_cg_ratio",   # fraction of positive CG in storm — decay indicator
@@ -1156,10 +1154,11 @@ print(f"    Stress   : Leave-one-airport-out (2-3 airports)")
 print(f"\n  IMBALANCE HANDLING:")
 print(f"    scale_pos_weight = {ratio}")
 print(f"\n  MODEL METRIC TARGETS:")
-print(f"    Rule baseline F1    : {rule_f1:.4f}")
-print(f"    Rule baseline AUC   : {rule_auc:.4f}")
-print(f"    Rule baseline Brier : {rule_brier:.4f}")
-print(f"    ML model must beat all three.")
+print(f"    Rule baseline F1    : {rule_f1:.4f}  ← theoretical ceiling (hindsight)")
+print(f"    Rule baseline AUC   : {rule_auc:.4f}  ← rule marks last strike in completed segment")
+print(f"    Rule baseline Brier : {rule_brier:.4f}  ← model cannot beat this; rule cheats with future data")
+print(f"    Blind baseline Brier: {neg/(pos+neg)*(1-neg/(pos+neg)):.4f}  ← always-predict-False (real target to beat)")
+print(f"    → ML target: beat blind baseline Brier on held-out segment groups.")
 print("="*70)
 
 # %% 8B: Save all outputs
@@ -1199,3 +1198,429 @@ save_to_drive(
 
 log.info("All EDA outputs saved to Drive.")
 print(f"\n✅ EDA complete. All files saved to {SAVES_DIR}")
+
+# %% [markdown]
+# ---
+# ## PART 9 — Depth Analysis: Storm Patterns per Airport
+#
+# Three presentation-ready analyses built from seg_stats and df_cg.
+# All work from segment_key = airport + "_" + airport_alert_id.
+#
+# IMPORTANT DATA CLARIFICATION (build plan misconception):
+#   airport_alert_id is NaN for TWO distinct reasons:
+#     1. Strike is OUTSIDE 20km zone (geographic filter)
+#     2. Strike is INCLOUD (icloud=True) — alert system only fires on CG strikes
+#   Confirmed by data audit (PART 9A):
+#   df_inside (56,599 rows) = CG only inside 20km — IC never receives an alert_id.
+#   df_cg     (56,599 rows) = same as df_inside (df_inside[icloud==False] = df_inside).
+#   df_outside (450,472 rows) = 72,393 outside-20km CG + 378,079 IC (all zones).
+#
+# PART 9A — Data audit: icloud vs alert_id breakdown (documents the misconception)
+# PART 9B — Storm volume: segments per airport, year by year
+# PART 9C — Storm intensity: strikes per segment distribution per airport
+# PART 9D — Danger windows: peak storm periods per airport (month × hour heatmap)
+
+# %% 9A: Data audit — icloud vs alert_id relationship
+# Confirms that IC strikes do not receive an alert_id even when inside 20km.
+# This is structural to the alert system: only CG strikes trigger airport alerts.
+
+audit = (
+    df.groupby("icloud")
+    .agg(
+        has_alert_id=("airport_alert_id", lambda x: x.notna().sum()),
+        no_alert_id =("airport_alert_id", lambda x: x.isna().sum()),
+        total_rows  =("airport_alert_id", "size"),   # .size() counts all rows, incl. NaN
+    )
+    .assign(pct_with_alert=lambda x: (100 * x["has_alert_id"] / x["total_rows"]).round(1))
+)
+audit.index = audit.index.map({True: "IC (incloud=True)", False: "CG (incloud=False)"})
+
+cg_with    = audit.loc["CG (incloud=False)", "has_alert_id"]
+cg_without = audit.loc["CG (incloud=False)", "no_alert_id"]
+ic_with    = audit.loc["IC (incloud=True)",  "has_alert_id"]
+ic_without = audit.loc["IC (incloud=True)",  "no_alert_id"]
+
+print("\n=== DATA AUDIT: Who gets an airport_alert_id? ===")
+print(audit.to_string())
+print(f"\nKey facts:")
+print(f"  CG strikes with alert_id    : {cg_with:,}  ← inside 20km (labeled training set)")
+print(f"  CG strikes without alert_id : {cg_without:,}  ← outside 20km (context only)")
+print(f"  IC strikes with alert_id    : {ic_with:,}   ← IC never receives an alert_id")
+print(f"  IC strikes without alert_id : {ic_without:,}  ← all IC strikes, everywhere")
+print(f"\nConclusion:")
+print(f"  → airport_alert_id = NaN has TWO causes, not one:")
+print(f"      1. Strike is OUTSIDE 20km zone  ({cg_without:,} CG rows)")
+print(f"      2. Strike is INCLOUD (icloud=True)  ({ic_without:,} IC rows)")
+print(f"  → IC strikes NEVER receive an airport_alert_id regardless of distance.")
+print(f"  → df_outside ({len(df_outside):,} rows) = outside-20km CG + ALL IC strikes.")
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+fig.suptitle("PART 9A · Data Audit — Who Receives an Airport Alert ID?",
+             fontsize=13)
+
+# Stacked bar: has vs no alert_id by strike type
+categories = ["CG (incloud=False)", "IC (incloud=True)"]
+has_vals = [audit.loc[c, "has_alert_id"] for c in categories]
+no_vals  = [audit.loc[c, "no_alert_id"]  for c in categories]
+
+axes[0].bar(categories, has_vals, label="Has alert_id",
+            color=["#2ECC71", "#2ECC71"], alpha=0.85, edgecolor="white")
+axes[0].bar(categories, no_vals, bottom=has_vals, label="No alert_id",
+            color=["#E74C3C", "#E74C3C"], alpha=0.6, edgecolor="white")
+axes[0].set_ylabel("# Rows")
+axes[0].set_title("alert_id Coverage by Strike Type\n"
+                  "CG inside 20km = labeled  |  IC = never labeled")
+axes[0].legend()
+for i, (h, n) in enumerate(zip(has_vals, no_vals)):
+    total = h + n
+    if total > 0:
+        axes[0].text(i, total + total * 0.01,
+                     f"total: {total:,}", ha="center", fontsize=8)
+    if h > 0:
+        axes[0].text(i, h / 2, f"{h:,}\n({100*h/total:.0f}%)",
+                     ha="center", fontsize=9, color="white", fontweight="bold")
+
+# Pie: composition of df_outside (450K rows)
+outside_cg = df_outside[df_outside["icloud"] == False]
+outside_ic = df_outside[df_outside["icloud"] == True]
+axes[1].pie(
+    [len(outside_cg), len(outside_ic)],
+    labels=[
+        f"CG outside 20km\n{len(outside_cg):,}",
+        f"IC (all zones, no alert)\n{len(outside_ic):,}",
+    ],
+    colors=["#3498DB", "#F39C12"],
+    autopct="%1.1f%%", startangle=90,
+    wedgeprops={"edgecolor": "white", "linewidth": 1.5},
+)
+axes[1].set_title("Composition of df_outside\n(450K rows with NaN alert_id)")
+
+plt.tight_layout()
+save_to_drive(fig, FIG_DIR / "p9a_data_audit_alert_id.png")
+plt.show()
+
+# %% [markdown]
+# ---
+# ### PART 9B — Storm Volume: How Many Storms per Airport, Year by Year?
+#
+# Each row in seg_stats is one storm alert (one segment).
+# This shows inter-annual variability and whether storm activity is
+# stable, growing, or clustered in specific years per airport.
+
+# %% 9B: Segments per airport per year
+seg_stats["year"] = seg_stats["date_start"].dt.year
+
+yearly_counts = (
+    seg_stats.groupby(["airport", "year"])
+    .size()
+    .reset_index(name="n_segments")
+)
+
+# Pivot for heatmap: airports × years
+pivot_yearly = yearly_counts.pivot(
+    index="airport", columns="year", values="n_segments"
+).fillna(0).astype(int)
+
+# Summary stats per airport across years
+yearly_summary = yearly_counts.groupby("airport")["n_segments"].agg(
+    total   ="sum",
+    mean    ="mean",
+    std     ="std",
+    min     ="min",
+    max     ="max",
+    peak_year=lambda x: yearly_counts.loc[x.index, "year"].iloc[x.values.argmax()],
+).round(1)
+
+print("\n=== STORM VOLUME PER AIRPORT (year by year) ===")
+print(pivot_yearly.to_string())
+print(f"\n=== AIRPORT STORM SUMMARY ===")
+print(yearly_summary.to_string())
+
+fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+fig.suptitle("PART 9B · Storm Volume per Airport — Year by Year",
+             fontsize=13)
+
+# Grouped bar chart: one group per year, bars coloured by airport
+years    = sorted(yearly_counts["year"].unique())
+airports = sorted(yearly_counts["airport"].unique())
+x = np.arange(len(years))
+bar_width = 0.15
+
+for i, ap in enumerate(airports):
+    vals = [
+        yearly_counts[
+            (yearly_counts["airport"] == ap) &
+            (yearly_counts["year"]    == yr)
+        ]["n_segments"].sum()
+        for yr in years
+    ]
+    axes[0].bar(x + i * bar_width, vals, width=bar_width,
+                label=ap, color=AP_COLORS.get(ap, "gray"),
+                edgecolor="white", alpha=0.85)
+
+axes[0].set_xticks(x + bar_width * (len(airports) - 1) / 2)
+axes[0].set_xticklabels(years, rotation=45)
+axes[0].set_xlabel("Year")
+axes[0].set_ylabel("Number of Storm Alerts")
+axes[0].set_title("Storm Alert Count per Airport, per Year\n"
+                  "(Each bar = one airport, one year)")
+axes[0].legend(title="Airport", fontsize=9)
+
+# Heatmap: airports (rows) × years (cols)
+sns.heatmap(
+    pivot_yearly,
+    annot=True, fmt="d",
+    cmap="YlOrRd",
+    linewidths=0.5,
+    ax=axes[1],
+    cbar_kws={"label": "# Storm Alerts"},
+)
+axes[1].set_title("Storm Alert Heatmap\n(darker = more storms that year)")
+axes[1].set_xlabel("Year")
+axes[1].set_ylabel("Airport")
+
+plt.tight_layout()
+save_to_drive(fig, FIG_DIR / "p9b_storm_volume_by_year.png")
+plt.show()
+save_to_drive(yearly_counts, SAVES_DIR / "storm_volume_per_airport_year.csv")
+
+# %% [markdown]
+# ---
+# ### PART 9C — Storm Intensity: How Many Strikes per Storm, per Airport?
+#
+# seg_stats["n_strikes"] = CG strikes per storm alert.
+# Short storms (1-3 strikes) behave very differently from long ones (50+).
+# This reveals each airport's typical storm profile.
+
+# %% 9C: Strike count distribution per airport
+strike_summary = (
+    seg_stats.groupby("airport")["n_strikes"]
+    .describe(percentiles=[0.25, 0.5, 0.75, 0.90, 0.95])
+    .round(1)
+)
+
+print("\n=== STRIKES PER SEGMENT (STORM INTENSITY) BY AIRPORT ===")
+print(strike_summary.to_string())
+
+# Classify storms by intensity for each airport
+def classify_storm(n):
+    if n == 1:    return "Single-strike (n=1)"
+    if n <= 5:    return "Short (2–5)"
+    if n <= 20:   return "Medium (6–20)"
+    if n <= 50:   return "Long (21–50)"
+    return "Severe (>50)"
+
+seg_stats["storm_class"] = seg_stats["n_strikes"].apply(classify_storm)
+storm_class_order = ["Single-strike (n=1)", "Short (2–5)",
+                     "Medium (6–20)", "Long (21–50)", "Severe (>50)"]
+class_colors = {
+    "Single-strike (n=1)": "#BDC3C7",
+    "Short (2–5)":         "#3498DB",
+    "Medium (6–20)":       "#F39C12",
+    "Long (21–50)":        "#E67E22",
+    "Severe (>50)":        "#E74C3C",
+}
+
+fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+fig.suptitle("PART 9C · Storm Intensity per Airport — Strikes per Storm Alert",
+             fontsize=13)
+
+# Box plot: n_strikes distribution by airport (log scale for readability)
+data_by_airport = [
+    seg_stats[seg_stats["airport"] == ap]["n_strikes"].values
+    for ap in airports
+]
+bp = axes[0].boxplot(
+    data_by_airport, labels=airports, patch_artist=True,
+    medianprops={"color": "white", "linewidth": 2},
+    flierprops={"marker": ".", "markersize": 3, "alpha": 0.4},
+)
+for patch, ap in zip(bp["boxes"], airports):
+    patch.set_facecolor(AP_COLORS.get(ap, "gray"))
+    patch.set_alpha(0.75)
+axes[0].set_yscale("log")
+axes[0].set_ylabel("Strikes per Storm (log scale)")
+axes[0].set_title("Strike Count Distribution\n(log scale — high outliers exist)")
+axes[0].tick_params(axis="x", rotation=30)
+
+# Stacked bar: storm class breakdown per airport (percentage)
+class_pivot = (
+    seg_stats.groupby(["airport", "storm_class"])
+    .size()
+    .unstack(fill_value=0)
+    .reindex(columns=[c for c in storm_class_order
+                      if c in seg_stats["storm_class"].unique()],
+             fill_value=0)
+)
+class_pct = class_pivot.div(class_pivot.sum(axis=1), axis=0) * 100
+
+bottom = np.zeros(len(airports))
+for cls in class_pct.columns:
+    vals = [class_pct.loc[ap, cls] if ap in class_pct.index else 0
+            for ap in airports]
+    axes[1].bar(airports, vals, bottom=bottom,
+                label=cls, color=class_colors.get(cls, "gray"),
+                edgecolor="white", alpha=0.88)
+    bottom += np.array(vals)
+
+axes[1].set_ylabel("% of Storm Alerts")
+axes[1].set_title("Storm Class Breakdown per Airport\n"
+                  "(% of alerts by severity)")
+axes[1].legend(fontsize=8, loc="upper right")
+axes[1].tick_params(axis="x", rotation=30)
+
+# Median + 95th percentile strikes per airport — summary bar
+median_vals  = [seg_stats[seg_stats["airport"]==ap]["n_strikes"].median()
+                for ap in airports]
+p95_vals     = [seg_stats[seg_stats["airport"]==ap]["n_strikes"].quantile(0.95)
+                for ap in airports]
+
+x_pos = np.arange(len(airports))
+axes[2].bar(x_pos - 0.2, median_vals, width=0.35,
+            color=[AP_COLORS.get(ap, "gray") for ap in airports],
+            label="Median", alpha=0.85, edgecolor="white")
+axes[2].bar(x_pos + 0.2, p95_vals, width=0.35,
+            color=[AP_COLORS.get(ap, "gray") for ap in airports],
+            label="95th percentile", alpha=0.45, edgecolor="white",
+            hatch="//")
+axes[2].set_xticks(x_pos)
+axes[2].set_xticklabels(airports, rotation=30)
+axes[2].set_ylabel("CG Strikes per Storm Alert")
+axes[2].set_title("Median vs 95th Percentile Strikes\n"
+                  "(solid=median, hatched=95th pct)")
+axes[2].legend()
+
+plt.tight_layout()
+save_to_drive(fig, FIG_DIR / "p9c_storm_intensity_per_airport.png")
+plt.show()
+save_to_drive(strike_summary.reset_index(), SAVES_DIR / "storm_intensity_summary.csv")
+
+# %% [markdown]
+# ---
+# ### PART 9D — Danger Windows: When Do Storms Peak per Airport?
+#
+# For each airport: which months and hours of day see the most storm alerts?
+# "Danger window" = the month × hour combination with highest storm count.
+# Directly relevant to operational planning and jury presentation.
+
+# %% 9D: Peak storm periods per airport
+# Extract time features from the FIRST strike of each segment (alert start time)
+seg_stats["seg_month"] = seg_stats["date_start"].dt.month
+seg_stats["seg_hour"]  = seg_stats["date_start"].dt.hour
+
+MONTH_LABELS = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
+                7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}
+
+# Per-airport danger window: month × hour heatmap
+fig, axes = plt.subplots(2, 3, figsize=(22, 12))
+fig.suptitle("PART 9D · Danger Windows per Airport\n"
+             "(Storm alert frequency by month and hour of day)",
+             fontsize=13)
+
+danger_summary = []
+
+for ax, ap in zip(axes.flatten(), airports):
+    ap_segs = seg_stats[seg_stats["airport"] == ap]
+
+    heatmap_data = (
+        ap_segs.groupby(["seg_month", "seg_hour"])
+        .size()
+        .unstack(fill_value=0)
+        .reindex(index=range(1, 13), columns=range(0, 24), fill_value=0)
+    )
+    heatmap_data.index = [MONTH_LABELS[m] for m in heatmap_data.index]
+
+    sns.heatmap(
+        heatmap_data,
+        ax=ax,
+        cmap="YlOrRd",
+        linewidths=0.2,
+        cbar_kws={"label": "# Storm Alerts"},
+        vmin=0,
+    )
+
+    # Identify peak danger window
+    peak_month_idx, peak_hour = np.unravel_index(
+        heatmap_data.values.argmax(), heatmap_data.shape
+    )
+    peak_month_name = list(MONTH_LABELS.values())[peak_month_idx]
+    peak_count      = heatmap_data.values.max()
+
+    # Top-3 months by total storm count
+    monthly_totals  = heatmap_data.sum(axis=1).sort_values(ascending=False)
+    top3_months     = ", ".join(monthly_totals.head(3).index.tolist())
+
+    # Seasonal label
+    peak_month_num  = list(MONTH_LABELS.keys())[peak_month_idx]
+    season = (
+        "Summer (Jun–Aug)"   if peak_month_num in [6,7,8]  else
+        "Autumn (Sep–Nov)"   if peak_month_num in [9,10,11] else
+        "Winter (Dec–Feb)"   if peak_month_num in [12,1,2]  else
+        "Spring (Mar–May)"
+    )
+    time_of_day = (
+        "Night (00–05)"      if peak_hour < 6  else
+        "Morning (06–11)"    if peak_hour < 12 else
+        "Afternoon (12–17)"  if peak_hour < 18 else
+        "Evening (18–23)"
+    )
+
+    ax.set_title(
+        f"{ap}\n"
+        f"Peak: {peak_month_name} {peak_hour:02d}:00 UTC  ({peak_count} alerts)\n"
+        f"Top months: {top3_months}",
+        fontsize=9,
+    )
+    ax.set_xlabel("Hour of Day (UTC)")
+    ax.set_ylabel("")
+    ax.tick_params(axis="x", labelsize=7, rotation=0)
+    ax.tick_params(axis="y", labelsize=7)
+
+    danger_summary.append({
+        "airport"       : ap,
+        "peak_month"    : peak_month_name,
+        "peak_hour_utc" : peak_hour,
+        "peak_count"    : peak_count,
+        "top3_months"   : top3_months,
+        "season"        : season,
+        "time_of_day"   : time_of_day,
+        "total_alerts"  : len(ap_segs),
+        "median_strikes": ap_segs["n_strikes"].median(),
+    })
+
+# Hide unused subplot (6 slots, 5 airports)
+axes.flatten()[-1].set_visible(False)
+
+plt.tight_layout()
+save_to_drive(fig, FIG_DIR / "p9d_danger_windows_per_airport.png")
+plt.show()
+
+# %% 9D-summary: Danger window table — jury-ready
+danger_df = pd.DataFrame(danger_summary).set_index("airport")
+
+print("\n" + "=" * 75)
+print("  AIRPORT DANGER WINDOW SUMMARY — For Presentation")
+print("=" * 75)
+print(f"\n{'Airport':<12} {'Peak Month':<12} {'Peak Hour':<12} "
+      f"{'Season':<22} {'Time of Day':<22} {'Total Alerts'}")
+print("-" * 75)
+for ap, row in danger_df.iterrows():
+    print(f"{ap:<12} {row['peak_month']:<12} {row['peak_hour_utc']:02d}:00 UTC    "
+          f"{row['season']:<22} {row['time_of_day']:<22} {row['total_alerts']}")
+
+print(f"\n  Key findings:")
+busiest = danger_df["total_alerts"].idxmax()
+quietest = danger_df["total_alerts"].idxmin()
+print(f"  → {busiest} has most storm alerts ({danger_df.loc[busiest,'total_alerts']})")
+print(f"  → {quietest} has fewest storm alerts ({danger_df.loc[quietest,'total_alerts']})")
+
+# Airport with most severe storms (highest median strikes)
+most_severe = danger_df["median_strikes"].idxmax()
+print(f"  → {most_severe} has most intense storms "
+      f"(median {danger_df.loc[most_severe,'median_strikes']:.0f} strikes/alert)")
+
+save_to_drive(danger_df.reset_index(), SAVES_DIR / "airport_danger_windows.csv")
+save_to_drive(seg_stats,               SAVES_DIR / "segment_stats_final.csv")
+
+log.info("PART 9 depth analysis complete.")
+print(f"\n✅ PART 9 complete. Outputs saved to {SAVES_DIR}")
