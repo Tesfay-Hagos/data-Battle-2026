@@ -9,12 +9,15 @@
 # | 0.1 — Mount Drive | Connect Google Drive |
 # | 0.2 — Configure paths | Set project root + create output dirs |
 # | 0.3 — Check files | Verify all required files exist before running |
-# | 0.4 — Install deps | Install LightGBM, scikit-learn, tqdm if missing |
+# | 0.4 — Install deps | Install LightGBM, scikit-learn, optuna, codecarbon if missing |
 # | 0.5 — Import modules | Load src/ pipeline modules |
+# | 0.6 — Tune (optional) | Optuna hyperparameter search (saves best_params.json) |
 # | 1 — Train | Feature engineering + 5-fold CV + temporal test |
+# | 1.5 — Carbon report | Print energy consumption from training |
 # | 2 — Evaluate | OOF metrics + gain/risk sweep |
 # | 3 — Predict | Generate predictions.csv for submission |
 # | 4 — Sanity check | Verify predictions file before sending |
+# | 5 — SHAP | Explainability plots (requires trained models) |
 
 # %% [markdown]
 # ## Cell 0.1 — Mount Google Drive
@@ -61,6 +64,7 @@ required = {
     "train.py"      : os.path.join(PROJECT_ROOT, "src", "train.py"),
     "evaluate.py"   : os.path.join(PROJECT_ROOT, "src", "evaluate.py"),
     "predict.py"    : os.path.join(PROJECT_ROOT, "src", "predict.py"),
+    "tune.py"       : os.path.join(PROJECT_ROOT, "src", "tune.py"),
 }
 
 all_ok = True
@@ -93,6 +97,9 @@ deps = [
     ("lightgbm",     "lightgbm"),
     ("scikit-learn", "sklearn"),
     ("tqdm",         "tqdm"),
+    ("optuna",       "optuna"),
+    ("codecarbon",   "codecarbon"),
+    ("shap",         "shap"),
 ]
 
 for pkg, import_name in deps:
@@ -116,13 +123,66 @@ from features import build_all_features, FEATURE_COLS   # noqa: F401
 from train    import train                               # noqa: F401
 from evaluate import full_report, oof_gain_risk_report    # noqa: F401
 from predict  import predict                             # noqa: F401
+from tune     import tune                                # noqa: F401
 
 print("✅ features.py  imported")
 print("✅ train.py     imported")
 print("✅ evaluate.py  imported")
 print("✅ predict.py   imported")
+print("✅ tune.py      imported")
 print()
-print("Ready — run Cell 1 to start training.")
+print("Ready — run Cell 0.6 (optional tuning) or Cell 1 to start training.")
+
+# %% [markdown]
+# ## Cell 0.6 — Tune hyperparameters (auto-skip if already done)
+#
+# - If `outputs/saves/best_params.json` **exists and has content** → prints the
+#   saved params and skips tuning entirely.
+# - If the file is **missing or empty** → runs Optuna (50 trials, ~15–30 min on
+#   Colab CPU) and saves the results.
+#
+# To **force a re-tune** (e.g. after adding new features), delete the file first:
+# ```python
+# import os; os.remove(os.path.join(PROJECT_ROOT, "outputs/saves/best_params.json"))
+# ```
+
+# %%
+import json as _json
+
+BEST_PARAMS_PATH = os.path.join(PROJECT_ROOT, "outputs", "saves", "best_params.json")
+
+def _load_best_params(path):
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            params = _json.load(f)
+        return params if params else None
+    except (ValueError, OSError):
+        return None
+
+existing = _load_best_params(BEST_PARAMS_PATH)
+
+if existing:
+    print("✅ best_params.json already exists — skipping tuning")
+    print(f"   {BEST_PARAMS_PATH}")
+    print()
+    print("   Saved hyperparameters:")
+    for k, v in existing.items():
+        print(f"     {k:<22}: {v}")
+    print()
+    print("ℹ️  These will be loaded automatically by Cell 1 (train.py).")
+    print("   Delete the file and re-run this cell to search again.")
+else:
+    print("ℹ️  No best_params.json found — starting Optuna search (50 trials)...")
+    print("   This takes ~15–30 min on Colab CPU. Grab a coffee ☕")
+    tune(n_trials=50)
+    print()
+    reloaded = _load_best_params(BEST_PARAMS_PATH)
+    if reloaded:
+        print("✅ Tuning complete. Best params saved:")
+        for k, v in reloaded.items():
+            print(f"     {k:<22}: {v}")
 
 # %% [markdown]
 # ## Cell 1 — Train
@@ -141,6 +201,39 @@ print("Ready — run Cell 1 to start training.")
 
 # %%
 train()
+
+# %% [markdown]
+# ## Cell 1.5 — Carbon / energy report
+#
+# Reads `outputs/logs/carbon_report.csv` (written by CodeCarbon during training)
+# and prints the energy consumption in human-readable form.
+
+# %%
+import glob as _glob
+
+LOGS_DIR = os.path.join(PROJECT_ROOT, "outputs", "logs")
+carbon_files = _glob.glob(os.path.join(LOGS_DIR, "carbon_report*.csv"))
+
+if not carbon_files:
+    print("⚠️  No carbon_report.csv found in outputs/logs/ — re-run Cell 1")
+else:
+    import pandas as _pd
+    carbon = _pd.read_csv(carbon_files[-1])
+    row = carbon.iloc[-1]   # last run
+
+    emissions_kg = float(row.get("emissions", 0) or 0)
+    duration_s   = float(row.get("duration",  0) or 0)
+    energy_kwh   = float(row.get("energy_consumed", emissions_kg / 0.233) or 0)
+    km_driven    = emissions_kg / 0.170 if emissions_kg > 0 else 0
+
+    print("=" * 55)
+    print("⚡ Energy & Carbon Report — last training run")
+    print("=" * 55)
+    print(f"  Duration      : {duration_s/60:.1f} min")
+    print(f"  Energy used   : {energy_kwh:.4f} kWh")
+    print(f"  CO₂ equivalent: {emissions_kg * 1000:.1f} g")
+    print(f"  ≈ {km_driven:.2f} km driven by a typical petrol car")
+    print(f"  Report file   : {carbon_files[-1]}")
 
 # %% [markdown]
 # ## Cell 2.1 — OOF evaluation report
@@ -232,3 +325,38 @@ if issues:
 else:
     print("✅ No issues found")
     print("✅ Ready to submit:", SUBMISSION)
+
+# %% [markdown]
+# ## Cell 5 — SHAP Explainability
+#
+# Generates SHAP explanation plots and saves them to `outputs/figures/`.
+# **Requires trained models** (run Cell 1 first).
+#
+# Saves:
+# - `shap_summary_bar.png` — global top 20 feature importance
+# - `shap_beeswarm.png` — feature impact distribution
+# - `shap_dependence_top3.png` — dependence plots for top 3 features
+# - `shap_waterfall_last_strike.png` — example: high-confidence last strike
+# - `shap_waterfall_early_strike.png` — example: early strike (model says no)
+# - `shap_per_airport.png` — per-airport feature importance heatmap
+#
+# ⏱ Runtime: ~2–5 min
+
+# %%
+import importlib
+import runpy
+
+SHAP_NB = os.path.join(PROJECT_ROOT, "notebooks", "05_shap_explainability.py")
+
+if not os.path.exists(SHAP_NB):
+    print("❌ 05_shap_explainability.py not found.")
+    print("   Run  make push-drive  locally first to upload it.")
+else:
+    print(f"▶  Running: {SHAP_NB}")
+    runpy.run_path(SHAP_NB, run_name="__main__")
+    print()
+    FIGDIR = os.path.join(PROJECT_ROOT, "outputs", "figures")
+    shap_figs = [f for f in os.listdir(FIGDIR) if f.startswith("shap_") and f.endswith(".png")]
+    print(f"✅ {len(shap_figs)} SHAP figures saved to {FIGDIR}:")
+    for f in sorted(shap_figs):
+        print(f"   {f}")

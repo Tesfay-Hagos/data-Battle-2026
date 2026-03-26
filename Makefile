@@ -8,6 +8,7 @@
 #   make run-eda         Run EDA script directly as Python
 #   make run-final-eda   Run 03_final_eda_and_features.py
 #   make sync            Two-way sync .py ↔ .ipynb
+#   make tune            Optuna hyperparameter search (saves best_params.json)
 #   make pipeline        Run full pipeline: features→train→evaluate→predict
 #   make train           Build features + train LightGBM (CV + temporal test)
 #   make evaluate        Print OOF + gain/risk report from saved results
@@ -72,6 +73,14 @@ run-final-eda:
 	MPLBACKEND=Agg $(PYTHON) $(NBDIR)/03_final_eda_and_features.py
 	@echo "Done. Figures saved to outputs/figures/"
 
+## ── tune: Optuna hyperparameter search ──────────────────────────────────────
+.PHONY: tune
+tune:
+	@echo "══════════════════════════════════════════════════"
+	@echo " Optuna Hyperparameter Search (50 trials)"
+	@echo "══════════════════════════════════════════════════"
+	$(PYTHON) $(SRCDIR)/tune.py
+
 ## ── pipeline: run full pipeline end-to-end ──────────────────────────────────
 ## features → train (CV + temporal) → evaluate (OOF + gain/risk) → predict
 .PHONY: pipeline
@@ -118,6 +127,7 @@ sync:
 push-drive: notebook
 	@echo "Uploading notebooks to Google Drive …"
 	@rclone copy $(NBDIR) $(DRIVE_NB) --include "*.ipynb" --progress
+	@rclone copy $(NBDIR) $(DRIVE_NB) --include "*.py" --progress
 	@echo "Uploading src/ to Google Drive …"
 	@rclone copy $(SRCDIR) $(DRIVE_SRC) --include "*.py" --progress
 	@echo "Uploading env_setup.py to Google Drive …"
@@ -146,6 +156,9 @@ clean:
 help:
 	@echo ""
 	@echo "DataBattle 2026 — available make targets:"
+	@echo ""
+	@echo "  Hyperparameter search (run before pipeline):"
+	@echo "    make tune            Optuna search → outputs/saves/best_params.json"
 	@echo ""
 	@echo "  Pipeline (run in order):"
 	@echo "    make pipeline        Full run: train → evaluate → predict"

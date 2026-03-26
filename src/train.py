@@ -11,6 +11,8 @@ Outputs (all under outputs/):
     saves/threshold_best.txt      — decision threshold tuned on OOF predictions
     saves/cv_scores.csv           — per-fold AUC, F1, Brier
     saves/temporal_scores.csv     — temporal stress-test scores (train≤2020, val≥2021)
+    saves/best_params.json        — loaded automatically if produced by src/tune.py
+    logs/carbon_report.csv        — energy consumption + CO2 from CodeCarbon
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from pathlib import Path
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from codecarbon import EmissionsTracker
 from sklearn.metrics import (
     brier_score_loss,
     f1_score,
@@ -45,9 +48,11 @@ from features import FEATURE_COLS, GROUP_COL, TARGET, build_all_features  # noqa
 DATA_PATH    = ROOT / "data" / "segment_alerts_all_airports_train.csv"
 MODELS_DIR   = ROOT / "outputs" / "models"
 SAVES_DIR    = ROOT / "outputs" / "saves"
+LOGS_DIR     = ROOT / "outputs" / "logs"
 
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 SAVES_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LightGBM hyperparameters
@@ -71,6 +76,22 @@ LGBM_PARAMS: dict = {
     "random_state"     : 42,
     "n_jobs"           : -1,
 }
+
+BEST_PARAMS_PATH = SAVES_DIR / "best_params.json"
+
+
+def _load_params() -> dict:
+    """Merge tuned params from tune.py over defaults if available."""
+    params = LGBM_PARAMS.copy()
+    if BEST_PARAMS_PATH.exists():
+        with open(BEST_PARAMS_PATH) as f:
+            tuned = json.load(f)
+        params.update(tuned)
+        print(f"   ✅ Loaded tuned params from {BEST_PARAMS_PATH}")
+    else:
+        print("   ℹ️  No best_params.json found — using default hyperparameters")
+        print("      Run  python src/tune.py  first for optimised params")
+    return params
 
 N_SPLITS       = 5
 EARLY_STOPPING = 50   # rounds without improvement on val logloss
@@ -109,9 +130,10 @@ def _fit_fold(
     X_val: pd.DataFrame,
     y_val: pd.Series,
     cat_features: list[str],
+    params: dict | None = None,
 ) -> tuple[lgb.LGBMClassifier, np.ndarray]:
     """Train one LightGBM fold and return (model, val_probabilities)."""
-    model = lgb.LGBMClassifier(**LGBM_PARAMS)
+    model = lgb.LGBMClassifier(**(params or LGBM_PARAMS))
     model.fit(
         X_tr, y_tr,
         eval_set=[(X_val, y_val)],
@@ -133,6 +155,18 @@ def train() -> None:
     print("=" * 72)
     print("DataBattle 2026 — Training")
     print("=" * 72)
+
+    # ── 0. Load hyperparameters (tuned or default) ────────────────────────────
+    params = _load_params()
+
+    # ── Start energy tracking ─────────────────────────────────────────────────
+    tracker = EmissionsTracker(
+        output_dir=str(LOGS_DIR),
+        output_file="carbon_report.csv",
+        log_level="error",
+        save_to_file=True,
+    )
+    tracker.start()
 
     # ── 1. Load and build features ────────────────────────────────────────────
     print(f"\n📂 Loading data: {DATA_PATH}")
@@ -179,7 +213,7 @@ def train() -> None:
         X_tr["airport_target_enc"]  = df_tr["airport"].map(pos_rate).values
         X_val["airport_target_enc"] = df.iloc[val_idx]["airport"].map(pos_rate).values
 
-        model, val_prob = _fit_fold(X_tr, y_tr, X_val, y_val, cat_features)
+        model, val_prob = _fit_fold(X_tr, y_tr, X_val, y_val, cat_features, params)
         oof[val_idx] = val_prob
 
         fold_scores = _score(y_val, val_prob)
@@ -244,7 +278,7 @@ def train() -> None:
         X_t_tr["airport_target_enc"]  = df_t_tr["airport"].map(pos_rate_t).values
         X_t_val["airport_target_enc"] = df.iloc[t_val_idx]["airport"].map(pos_rate_t).values
 
-        t_model, t_val_prob = _fit_fold(X_t_tr, y_t_tr, X_t_val, y_t_val, cat_features)
+        t_model, t_val_prob = _fit_fold(X_t_tr, y_t_tr, X_t_val, y_t_val, cat_features, params)
         t_scores = _score(y_t_val, t_val_prob, threshold=threshold)
 
         print(f"   Train rows: {len(t_tr_idx):,}  |  Val rows: {len(t_val_idx):,}")
@@ -259,6 +293,21 @@ def train() -> None:
             pickle.dump(t_model, f)
 
         print("✅ Saved: temporal_scores.csv, lgbm_temporal.pkl")
+
+    # ── 7. Stop energy tracker and report ────────────────────────────────────
+    emissions_kg = tracker.stop()   # kg CO₂ equivalent
+    print(f"\n{'=' * 72}")
+    print("⚡ Energy & Carbon Report")
+    print("=" * 72)
+    if emissions_kg is not None:
+        kwh = emissions_kg / 0.233   # average EU grid: ~233 g CO₂/kWh
+        km_driven = emissions_kg / 0.170   # EU avg car: ~170 g CO₂/km
+        print(f"   CO₂ equivalent : {emissions_kg * 1000:.1f} g")
+        print(f"   Energy used    : {kwh:.4f} kWh")
+        print(f"   ≈ {km_driven:.2f} km driven by a typical petrol car")
+        print(f"   Report saved   : {LOGS_DIR / 'carbon_report.csv'}")
+    else:
+        print("   ⚠️  CodeCarbon did not return an emissions value")
 
     print(f"\n{'=' * 72}")
     print("🏁 Training complete")
