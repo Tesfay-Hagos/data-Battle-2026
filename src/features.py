@@ -51,8 +51,8 @@ FEATURE_COLS: list[str] = [
     # B — Segment context (full-segment statistics)
     "seg_size_cg", "seg_mean_amp", "seg_mean_mag",
     "seg_duration_min", "seg_mean_dist", "seg_pos_cg_ratio",
-    # C — Position within segment
-    "rank_in_seg", "pct_position", "rank_rev_cg",
+    # C — Position within segment omitted (rank_in_seg, pct_position, rank_rev_cg).
+    # Any two of these three let the model reconstruct last-strike position exactly.
     # D — Temporal dynamics (lag / delta)
     "time_since_prev", "dist_delta", "mag_delta", "storm_speed",
     # E — Rolling activity (last N minutes within segment)
@@ -330,7 +330,7 @@ def add_outer_ring_features(
             .rolling("10min").count()
             .rename("outer_ring_cg_10min")
             .reset_index()
-            .assign(airport=g["airport"].iloc[0])
+            .assign(airport=g.name)   # g.name = group key (airport) in pandas 2.x
         )
 
     outer_agg = (
@@ -479,11 +479,7 @@ def build_all_features(
     if TARGET in df_cg.columns:
         df_cg[TARGET] = (
             df_cg[TARGET]
-            .map({
-                True: True, False: False,
-                1: True, 0: False,
-                "True": True, "False": False,
-            })
+            .replace({"True": True, "False": False})
             .astype(bool)
         )
 

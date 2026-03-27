@@ -1,0 +1,975 @@
+% ============================================================
+% DataBattle 2026 — Feature Reference Manual & Evaluation Guide
+% ============================================================
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[margin=2.5cm, headheight=15pt]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{fancyhdr}
+\usepackage{multirow}
+\usepackage{tcolorbox}
+\usepackage{listings}
+\usepackage{fontenc}
+
+% ── Colors ──────────────────────────────────────────────────
+\definecolor{truecolor}{HTML}{E74C3C}
+\definecolor{falsecolor}{HTML}{3498DB}
+\definecolor{accentcolor}{HTML}{2C3E50}
+\definecolor{goldcolor}{HTML}{F39C12}
+\definecolor{greencolor}{HTML}{27AE60}
+\definecolor{warningcolor}{HTML}{E67E22}
+\definecolor{lightgray}{HTML}{F4F4F4}
+\definecolor{codegray}{HTML}{2C3E50}
+
+% ── tcolorbox styles ────────────────────────────────────────
+\tcbuselibrary{skins,breakable}
+
+\newtcolorbox{warningbox}{
+  colback=warningcolor!10, colframe=warningcolor,
+  fonttitle=\bfseries, title={Warning --- Structural Leakage},
+  breakable
+}
+
+\newtcolorbox{infobox}[1]{
+  colback=falsecolor!8, colframe=falsecolor,
+  fonttitle=\bfseries, title={#1},
+  breakable
+}
+
+\newtcolorbox{formulabox}{
+  colback=lightgray, colframe=accentcolor,
+  breakable
+}
+
+% ── Code listing style ───────────────────────────────────────
+\lstset{
+  backgroundcolor=\color{lightgray},
+  basicstyle=\ttfamily\small,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{accentcolor},
+  breaklines=true,
+  columns=fullflexible,
+}
+
+% ── Header / Footer ─────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{DataBattle 2026}
+\lhead{Feature Reference Manual}
+\rfoot{\thepage}
+
+% ── Section colors ───────────────────────────────────────────
+\titleformat{\section}{\large\bfseries\color{accentcolor}}{}{0em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries\color{accentcolor!80}}{}{0em}{}
+
+% ── Table column type ────────────────────────────────────────
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+
+% ── Helpers ──────────────────────────────────────────────────
+\newcommand{\feat}[1]{\texttt{\textbf{#1}}}
+\newcommand{\group}[1]{\textcolor{accentcolor}{\textbf{Group #1}}}
+
+% ─────────────────────────────────────────────────────────────
+\title{
+  \vspace{-1cm}
+  {\Large \textbf{DataBattle 2026}}\\[0.4em]
+  {\large Feature Reference Manual \& Evaluation Protocol}\\[0.3em]
+  {\normalsize Complete mathematical definitions, sample values, and test mechanics}
+}
+\author{Team Documentation}
+\date{March 2026}
+% ─────────────────────────────────────────────────────────────
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+\tableofcontents
+\newpage
+
+% ═══════════════════════════════════════════════════════════════
+\section{Overview of the Problem}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{Goal}
+
+For each cloud-to-ground (CG) lightning strike recorded inside a 20~km radius around one of five French airports, predict the probability that this strike is the \textbf{last CG strike} before a 30-minute silence period. That silence marks the official end of the alert and the point at which ground crews can safely resume operations.
+
+\[
+  \hat{y}_i = P\!\left(\text{strike } i \text{ is the last CG strike in its segment}\right) \in [0, 1]
+\]
+
+\subsection{Raw Data Structure}
+
+The raw dataset contains \textbf{507,071 rows}, one per detected lightning strike (both CG and IC). Each row provides:
+
+\begin{center}
+\begin{tabular}{L{3.2cm} L{2cm} L{8cm}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\texttt{lightning\_id}   & int    & Global unique strike identifier \\
+\texttt{airport}         & string & Nearest airport (Ajaccio, Bastia, Biarritz, Nantes, Pise) \\
+\texttt{airport\_alert\_id} & float/NaN & Per-airport alert counter. \texttt{NaN} if outside 20~km or IC strike \\
+\texttt{date}            & datetime & UTC timestamp of the strike \\
+\texttt{amplitude}       & float (kA) & Signed discharge current. Negative = normal CG return stroke \\
+\texttt{maxis}           & float  & Peak current derivative \\
+\texttt{icloud}          & bool   & \texttt{True} = cloud-to-cloud (IC), \texttt{False} = CG \\
+\texttt{dist}            & float (km) & Distance of strike from the airport \\
+\texttt{azimuth}         & float ($^\circ$) & Compass bearing from airport to strike (0=N, 90=E) \\
+\texttt{is\_last\_lightning\_cloud\_ground} & bool & \textbf{Target.} True = last CG before 30-min silence \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Data Partitioning}
+
+Not all rows are used as model rows. Three populations are distinguished:
+
+\begin{center}
+\begin{tabular}{L{4cm} C{2cm} L{7cm}}
+\toprule
+\textbf{Population} & \textbf{Rows} & \textbf{Role} \\
+\midrule
+IC strikes (\texttt{icloud=True}) & 378,079 & Discarded entirely \\
+Outside-zone CG (\texttt{dist $>$ 20~km}) & 72,393 & Used only to compute outer-ring context feature \\
+\textbf{Inside-zone CG} & \textbf{56,599} & \textbf{Model rows --- the only rows scored} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Segments}
+
+A \textbf{segment} is one complete storm alert at one airport. It begins when a CG strike occurs inside 20~km and ends after 30 minutes of silence.
+
+\begin{equation}
+  \texttt{segment\_key} = \texttt{airport} \;\|\; \texttt{airport\_alert\_id}
+  \quad \text{(e.g., ``Ajaccio\_1'', ``Biarritz\_47'')}
+\end{equation}
+
+There are \textbf{2,744 segments} in training and \textbf{577 segments} in the test set. Within each segment, \textbf{exactly one strike} has \texttt{is\_last = True}.
+
+\newpage
+
+% ═══════════════════════════════════════════════════════════════
+\section{How the Test Works}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{What the evaluators give you}
+
+The test file (\texttt{dataset\_set.csv}) contains \textbf{183,945 rows}, of which 13,780 are inside-zone CG strikes in 577 complete segments. The label column \texttt{is\_last\_lightning\_cloud\_ground} is set to \texttt{False} for every row --- the answer is hidden.
+
+\begin{infobox}{Critical fact about test data}
+The test segments are \textbf{complete}: they include all CG strikes from alert start through to the true last strike. You are given the entire sequence. This is not a streaming problem.
+\end{infobox}
+
+\subsection{What you submit}
+
+Your submission is a CSV with \textbf{one row per inside-zone CG strike}:
+
+\begin{center}
+\begin{tabular}{L{4.5cm} L{8cm}}
+\toprule
+\textbf{Column} & \textbf{Meaning} \\
+\midrule
+\texttt{airport} & Airport name \\
+\texttt{airport\_alert\_id} & Alert counter (integer) \\
+\texttt{prediction\_date} & Timestamp of the strike being scored \\
+\texttt{predicted\_date\_end\_alert} & Your estimate of when the alert ends \\
+\texttt{confidence} & Model output: $\hat{y}_i \in [0,1]$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In our current setup, \texttt{predicted\_date\_end\_alert = prediction\_date} for every row (we predict the alert ends at the time of the strike itself).
+
+\subsection{Gain and Risk --- the official evaluation protocol}
+
+For a threshold $\theta \in (0,1)$, the evaluator processes each segment $(a, k)$ as follows:
+
+\begin{enumerate}
+  \item Select all rows of segment $(a,k)$ where \texttt{confidence} $> \theta$.
+  \item Take the \textbf{earliest} \texttt{predicted\_date\_end\_alert} among those rows --- call it $\hat{t}_{a,k}$.
+  \item Compute the gain for this segment:
+    \[
+      g_{a,k} = \underbrace{(t^*_{a,k} + 1800)}_{\text{baseline end}} - \hat{t}_{a,k}
+      \quad \text{[seconds]}
+    \]
+    where $t^*_{a,k}$ is the true last CG strike timestamp and $+1800$ seconds is the 30-minute operational baseline. If $g_{a,k} > 0$, you saved time. If $g_{a,k} < 0$, you ended the alert too early.
+\end{enumerate}
+
+\[
+  \text{Gain}(\theta) = \frac{1}{3600} \sum_{(a,k)} g_{a,k}
+  \quad \text{[hours saved]}
+\]
+
+\[
+  \text{Risk}(\theta) = \frac{\#\{\text{dangerous strikes after } \hat{t}_{a,k} \text{ with dist} < 3\,\text{km}\}}{\#\{\text{all dangerous strikes}\}}
+\]
+
+The best threshold $\theta^*$ is chosen as:
+\[
+  \theta^* = \arg\max_\theta \;\text{Gain}(\theta) \quad \text{subject to} \quad \text{Risk}(\theta) < 0.02
+\]
+
+\subsection{Is inference done strike-by-strike or as a batch?}
+
+\textbf{Full segment batch.} You receive all 13,780 test CG strikes at once, already grouped into complete segments. You compute all features over the full segment, then output one confidence score per strike. There is no streaming, no real-time state, no need to maintain history between strikes.
+
+This is why features that use the complete segment (segment size, reverse rank, etc.) are technically computable at inference time in this competition.
+
+\newpage
+
+% ═══════════════════════════════════════════════════════════════
+\section{Sample Segment Used Throughout This Manual}
+% ═══════════════════════════════════════════════════════════════
+
+All feature examples below use \textbf{Ajaccio\_1}: a 5-strike segment on January~2, 2016.
+
+\begin{center}
+\begin{tabular}{C{1.2cm} C{2.4cm} C{2.2cm} C{2cm} C{2.2cm} C{1.8cm}}
+\toprule
+\textbf{ID} & \textbf{Time (UTC)} & \textbf{Amplitude} & \textbf{Dist (km)} & \textbf{Azimuth ($^\circ$)} & \textbf{is\_last} \\
+\midrule
+4  & 21:22:53 & $-7.51$ kA  & 14.79 & 20.85 & False \\
+5  & 21:24:46 & $-6.01$ kA  & 15.12 & 29.06 & False \\
+6  & 21:25:59 & $-23.96$ kA & 15.58 & 18.93 & False \\
+7  & 21:27:04 & $-11.65$ kA & 15.34 & 38.64 & False \\
+9  & 21:28:54 & $-5.31$ kA  & 17.56 & 38.77 & \textbf{\textcolor{truecolor}{True}} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Segment summary: $N=5$ strikes, duration $= 361$~s $= 6.02$~min, mean distance $= 15.68$~km.
+
+\newpage
+
+% ═══════════════════════════════════════════════════════════════
+\section{Feature Reference}
+% ═══════════════════════════════════════════════════════════════
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group A --- Amplitude Decomposition}
+% ───────────────────────────────────────────────────────────────
+
+\subsubsection*{\feat{amplitude}}
+
+Raw signed discharge current from the sensor. No transformation.
+
+\begin{formulabox}
+\[
+  \texttt{amplitude}_i = a_i \in \mathbb{R} \quad [\text{kA}]
+\]
+\end{formulabox}
+
+Physical meaning: negative values indicate the standard negative cloud-to-ground return stroke. Positive values are less common and tend to occur more frequently late in a storm's lifecycle as the charge structure becomes disorganised.
+
+\textbf{Ajaccio\_1:} $-7.51,\ -6.01,\ -23.96,\ -11.65,\ -5.31$ kA
+
+\subsubsection*{\feat{amp\_magnitude}}
+
+Absolute intensity, removing the sign ambiguity.
+
+\begin{formulabox}
+\[
+  \texttt{amp\_magnitude}_i = |a_i|
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $7.51,\ 6.01,\ 23.96,\ 11.65,\ 5.31$ kA
+
+\subsubsection*{\feat{amp\_is\_positive}}
+
+Binary polarity flag.
+
+\begin{formulabox}
+\[
+  \texttt{amp\_is\_positive}_i = \mathbf{1}[a_i > 0]
+\]
+\end{formulabox}
+
+Physical meaning: the fraction of positive CG strikes increases as a storm decays. A rising positive ratio at the segment level (\feat{seg\_pos\_cg\_ratio}) is a known storm-ending indicator in the meteorological literature.
+
+\textbf{Ajaccio\_1:} $0, 0, 0, 0, 0$ (all negative --- early-stage storm character)
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group B --- Segment Aggregations (full-segment statistics)}
+% ───────────────────────────────────────────────────────────────
+
+Every strike in the segment receives the \textbf{same value} for these features. They describe the storm as a whole and require the complete segment to compute.
+
+Let segment $s$ contain $N_s$ strikes with indices $\mathcal{S} = \{i : \texttt{segment\_key}_i = s\}$.
+
+\subsubsection*{\feat{seg\_size\_cg}}
+
+\begin{formulabox}
+\[
+  \texttt{seg\_size\_cg}_i = N_s = |\mathcal{S}|
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} all 5 strikes receive value $5$.
+
+\subsubsection*{\feat{seg\_mean\_amp}}
+
+\begin{formulabox}
+\[
+  \texttt{seg\_mean\_amp}_i = \frac{1}{N_s} \sum_{j \in \mathcal{S}} a_j
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $\dfrac{-7.51 - 6.01 - 23.96 - 11.65 - 5.31}{5} = -10.888$ kA
+
+\subsubsection*{\feat{seg\_mean\_mag}}
+
+\begin{formulabox}
+\[
+  \texttt{seg\_mean\_mag}_i = \frac{1}{N_s} \sum_{j \in \mathcal{S}} |a_j|
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $\dfrac{7.51 + 6.01 + 23.96 + 11.65 + 5.31}{5} = 10.888$ kA
+
+\subsubsection*{\feat{seg\_duration\_min}}
+
+\begin{formulabox}
+\[
+  \texttt{seg\_duration\_min}_i = \frac{t_{\max(\mathcal{S})} - t_{\min(\mathcal{S})}}{60} \quad [\text{minutes}]
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $(21{:}28{:}54 - 21{:}22{:}53) = 361$ s $= 6.017$ min
+
+\subsubsection*{\feat{seg\_mean\_dist}}
+
+\begin{formulabox}
+\[
+  \texttt{seg\_mean\_dist}_i = \frac{1}{N_s} \sum_{j \in \mathcal{S}} d_j \quad [\text{km}]
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $\dfrac{14.79 + 15.12 + 15.58 + 15.34 + 17.56}{5} = 15.68$ km
+
+\subsubsection*{\feat{seg\_pos\_cg\_ratio}}
+
+\begin{formulabox}
+\[
+  \texttt{seg\_pos\_cg\_ratio}_i = \frac{1}{N_s} \sum_{j \in \mathcal{S}} \mathbf{1}[a_j > 0]
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $0/5 = 0.0$ (no positive strikes in this storm)
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group C --- Position Within Segment}
+% ───────────────────────────────────────────────────────────────
+
+Let $r_i$ be the 0-indexed temporal rank of strike $i$ within its segment ($r_i = 0$ for the first strike, $r_i = N_s - 1$ for the last).
+
+\subsubsection*{\feat{rank\_in\_seg}}
+
+Forward position, 0-indexed.
+
+\begin{formulabox}
+\[
+  \texttt{rank\_in\_seg}_i = r_i \in \{0, 1, \ldots, N_s - 1\}
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $0, 1, 2, 3, 4$
+
+\subsubsection*{\feat{pct\_position}}
+
+Fractional progress through the segment.
+
+\begin{formulabox}
+\[
+  \texttt{pct\_position}_i = \frac{r_i}{N_s}
+\]
+\end{formulabox}
+
+Note the denominator is $N_s$ (not $N_s - 1$), so the last strike receives $\dfrac{N_s - 1}{N_s} < 1$.
+
+\textbf{Ajaccio\_1:} $0.0,\ 0.2,\ 0.4,\ 0.6,\ \mathbf{0.8}$ \quad (last strike = 0.8, not 1.0)
+
+\subsubsection*{\feat{rank\_rev\_cg} \quad \textnormal{\textcolor{warningcolor}{--- leakage candidate}}}
+
+\begin{warningbox}
+This feature equals zero \textbf{if and only if} the strike is the last CG strike in the segment. Because the test data provides complete segments, this value is also 0 for the true last test strike. The model achieves AUC $\approx 1.0$ primarily by learning this rule in 1--2 tree splits.
+\end{warningbox}
+
+Reverse rank --- counts from the end of the segment.
+
+\begin{formulabox}
+\[
+  \texttt{rank\_rev\_cg}_i = (N_s - 1) - r_i
+  \;=\;
+  \begin{cases}
+    0 & \text{if } i \text{ is the last CG strike} \\
+    k & \text{if there are } k \text{ more strikes after } i
+  \end{cases}
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $4, 3, 2, 1, \mathbf{0}$ \quad (last strike = 0)
+
+\textbf{Measured correlation with target:}
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+& \texttt{is\_last = False} & \texttt{is\_last = True} \\
+\midrule
+\texttt{rank\_rev\_cg = 0} & 59 (2.3\%) & 2,568 (97.7\%) \\
+\texttt{rank\_rev\_cg > 0} & 53,913 (100\%) & 59 (0.1\%) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Precision = 97.7\%, Recall = 97.8\%, AUC of this feature alone $\approx 0.998$.
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group D --- Temporal Dynamics (Lag Features)}
+% ───────────────────────────────────────────────────────────────
+
+Each feature compares strike $i$ to the \textbf{previous strike} $i-1$ in the same segment. The first strike of every segment has $\texttt{NaN}$ for all Group D features (no predecessor exists). Single-strike segments receive sentinel values.
+
+\subsubsection*{\feat{time\_since\_prev}}
+
+Inter-strike gap in seconds.
+
+\begin{formulabox}
+\[
+  \texttt{time\_since\_prev}_i =
+  \begin{cases}
+    t_i - t_{i-1} & \text{if } i > 0 \text{ in segment} \\
+    \texttt{NaN} & \text{if } i = 0 \text{ (first strike)} \\
+    99999 & \text{if single-strike segment (sentinel)}
+  \end{cases}
+\]
+\end{formulabox}
+
+Physical meaning: a growing inter-strike gap signals the storm is decelerating. The 30-minute operational threshold means gaps of 600~s, 900~s, and 1,200~s are especially informative (see Group F).
+
+\textbf{Ajaccio\_1:}
+
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+Strike & Time & $t_i - t_{i-1}$ (s) & \texttt{time\_since\_prev} \\
+\midrule
+4 & 21:22:53 & --- & NaN \\
+5 & 21:24:46 & 113 & 113 \\
+6 & 21:25:59 & 73  & 73  \\
+7 & 21:27:04 & 65  & 65  \\
+9 & 21:28:54 & 110 & 110 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection*{\feat{dist\_delta}}
+
+Change in distance from airport --- positive = storm moving away.
+
+\begin{formulabox}
+\[
+  \texttt{dist\_delta}_i = d_i - d_{i-1} \quad [\text{km}]
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $\text{NaN},\ +0.33,\ +0.46,\ -0.24,\ \mathbf{+2.22}$
+
+The last strike moved $+2.22$~km further from the airport --- consistent with storm exit.
+
+\subsubsection*{\feat{mag\_delta}}
+
+Change in absolute amplitude --- negative = storm weakening.
+
+\begin{formulabox}
+\[
+  \texttt{mag\_delta}_i = |a_i| - |a_{i-1}| \quad [\text{kA}]
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $\text{NaN},\ -1.50,\ +17.95,\ -12.31,\ \mathbf{-6.34}$
+
+\subsubsection*{\feat{storm\_speed}}
+
+How far did the storm centroid move between consecutive strikes?
+
+\begin{formulabox}
+\[
+  \texttt{storm\_speed}_i = \sqrt{(\Delta x_i)^2 + (\Delta y_i)^2}
+  \quad [\text{km}]
+\]
+where $\Delta x_i = x_i - x_{i-1}$, $\Delta y_i = y_i - y_{i-1}$ (Cartesian, see Group E).
+\end{formulabox}
+
+Note: this is spatial displacement, not velocity (there is no division by time). A fast-moving storm exits the airport zone quickly, producing shorter alerts.
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group E --- Cartesian Coordinates and Rolling Activity}
+% ───────────────────────────────────────────────────────────────
+
+\subsubsection*{\feat{strike\_x}, \feat{strike\_y}}
+
+Convert polar coordinates (distance, bearing) to a flat Cartesian map centred on the airport.
+
+\begin{formulabox}
+\begin{align}
+  \texttt{strike\_x}_i &= d_i \cdot \sin(\alpha_i) \quad [\text{km East of airport}] \\
+  \texttt{strike\_y}_i &= d_i \cdot \cos(\alpha_i) \quad [\text{km North of airport}]
+\end{align}
+where $\alpha_i$ is azimuth in radians.
+\end{formulabox}
+
+\textbf{Ajaccio\_1 last strike} ($d = 17.56$~km, $\alpha = 38.77^\circ$):
+\[
+  x = 17.56 \cdot \sin(38.77^\circ) = 10.998 \text{ km East},
+  \quad
+  y = 17.56 \cdot \cos(38.77^\circ) = 13.692 \text{ km North}
+\]
+
+\subsubsection*{\feat{cg\_count\_10min}, \feat{cg\_count\_30min}}
+
+CG activity rate in a backward time window, scoped to the segment.
+
+\begin{formulabox}
+\[
+  \texttt{cg\_count\_W\_min}_i = \left|\left\{ j \in \mathcal{S} : t_i - W \cdot 60 < t_j \leq t_i \right\}\right|
+\]
+\end{formulabox}
+
+Physical meaning: a falling count over successive strikes signals the storm is running out of energy. This is the most direct measure of storm deceleration.
+
+\textbf{Ajaccio\_1} (all 5 strikes fall within a 6-min window, so both counts are identical): $1, 2, 3, 4, 5$
+
+\subsubsection*{\feat{rolling\_mean\_mag\_10min}}
+
+Mean absolute amplitude over the last 10~minutes --- is the storm weakening?
+
+\begin{formulabox}
+\[
+  \texttt{rolling\_mean\_mag\_10min}_i
+  = \frac{\sum_{j \in \mathcal{S},\, t_j \in (t_i - 10', t_i]} |a_j|}
+         {\left|\{j \in \mathcal{S} : t_j \in (t_i - 10', t_i]\}\right|}
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1:} $7.51,\ 6.76,\ 12.49,\ 12.28,\ 10.89$
+
+\subsubsection*{\feat{rolling\_pos\_ratio\_10min}}
+
+Fraction of positive CG strikes in the last 10~minutes --- rising fraction = decay phase.
+
+\begin{formulabox}
+\[
+  \texttt{rolling\_pos\_ratio\_10min}_i
+  = \frac{\sum_{j \in \mathcal{S},\, t_j \in (t_i - 10', t_i]} \mathbf{1}[a_j > 0]}
+         {\left|\{j \in \mathcal{S} : t_j \in (t_i - 10', t_i]\}\right|}
+\]
+\end{formulabox}
+
+\subsubsection*{\feat{rolling\_mean\_dist\_10min}}
+
+Mean distance over the last 10~minutes --- rising value = storm drifting away.
+
+\begin{formulabox}
+\[
+  \texttt{rolling\_mean\_dist\_10min}_i
+  = \frac{\sum_{j \in \mathcal{S},\, t_j \in (t_i - 10', t_i]} d_j}
+         {\left|\{j \in \mathcal{S} : t_j \in (t_i - 10', t_i]\}\right|}
+\]
+\end{formulabox}
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group F --- Silence Threshold Indicators}
+% ───────────────────────────────────────────────────────────────
+
+These are binary flags that encode whether the gap \textbf{before} this strike exceeded an operationally significant threshold. They look \textbf{backward} --- they flag silence that already happened before this strike, not silence that will follow it.
+
+\begin{formulabox}
+\begin{align}
+  \texttt{silence\_over\_10min}_i &= \mathbf{1}[\texttt{time\_since\_prev}_i > 600] \\
+  \texttt{silence\_over\_15min}_i &= \mathbf{1}[\texttt{time\_since\_prev}_i > 900] \\
+  \texttt{silence\_over\_20min}_i &= \mathbf{1}[\texttt{time\_since\_prev}_i > 1200]
+\end{align}
+\end{formulabox}
+
+Physical meaning: a gap of over 20~minutes before this strike means the storm nearly ended, then produced one more strike. The operational threshold is 30~minutes, so 20-minute gaps are very late in the storm lifecycle.
+
+\textbf{Ajaccio\_1:} all zeros --- longest gap is 113~s, well below any threshold.
+
+\textbf{Measured signal} (training set, 56,599 rows):
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Feature $= 1$ & \texttt{is\_last=False} & \texttt{is\_last=True} \\
+\midrule
+\texttt{silence\_over\_10min} & 4.0\% & 26.7\% \\
+\texttt{silence\_over\_15min} & 4.3\% & 30.0\% \\
+\texttt{silence\_over\_20min} & 4.4\% & 30.4\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+These features are informative but not leaky --- many non-last strikes also follow long gaps (mid-segment pauses).
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group G --- Interaction Features}
+% ───────────────────────────────────────────────────────────────
+
+\subsubsection*{\feat{silence\_x\_dist\_away}}
+
+Combines a long silence \textbf{and} storm moving away --- the strongest composite end signal.
+
+\begin{formulabox}
+\[
+  \texttt{silence\_x\_dist\_away}_i
+  = \texttt{silence\_over\_15min}_i \times \mathbf{1}[\texttt{dist\_delta}_i > 0]
+\]
+\end{formulabox}
+
+This equals 1 only when both conditions hold simultaneously: the gap before this strike exceeded 15~minutes \textit{and} the storm moved further from the airport. This joint condition is very specific to end-of-storm behaviour.
+
+\subsubsection*{\feat{weak\_and\_moving\_away}}
+
+Combines below-average amplitude \textbf{and} increasing distance.
+
+\begin{formulabox}
+\[
+  \texttt{weak\_and\_moving\_away}_i
+  = \mathbf{1}\!\left[|a_i| < \texttt{seg\_mean\_mag}_i\right]
+    \times
+    \mathbf{1}[\texttt{dist\_delta}_i > 0]
+\]
+\end{formulabox}
+
+\textbf{Ajaccio\_1 last strike:}
+$|a_9| = 5.31 < \texttt{seg\_mean\_mag} = 10.888$ \checkmark \;and\; $\texttt{dist\_delta}_9 = +2.22 > 0$ \checkmark \;$\Rightarrow$ value $= 1$
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group K --- Outer Ring Context (20--50 km)}
+% ───────────────────────────────────────────────────────────────
+
+\subsubsection*{\feat{outer\_ring\_cg\_10min}}
+
+CG activity in the broader 20--50~km zone around the airport in the last 10~minutes. Uses outside-zone strikes (\texttt{airport\_alert\_id = NaN}) which are \textbf{not} model rows but are used here as context.
+
+\begin{formulabox}
+\[
+  \texttt{outer\_ring\_cg\_10min}_i
+  = \left|\left\{
+      j \in \mathcal{O}_a :\ t_i - 600 < t_j \leq t_i
+    \right\}\right|
+\]
+where $\mathcal{O}_a$ = set of outside-zone CG strikes for airport $a$ (dist $> 20$~km).
+\end{formulabox}
+
+Computed via \texttt{pandas.merge\_asof} (backward join, tolerance 10~min) for efficiency.
+
+\textbf{Physical meaning:} if the outer ring is still active, the storm cell has not exhausted its energy supply and inner-zone CG strikes are likely to continue. If the outer ring goes quiet simultaneously with the inner zone, the whole system is collapsing.
+
+\textbf{Measured signal} (EDA, training set):
+\[
+  \text{Mean outer ring count:} \quad
+  \underbrace{22.5}_{\text{non-last strikes}}
+  \quad \text{vs} \quad
+  \underbrace{2.4}_{\text{last strikes}}
+\]
+A \textbf{10x difference} --- without using any future information. This is the strongest single physically-grounded feature.
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group I --- Calendar Features}
+% ───────────────────────────────────────────────────────────────
+
+\begin{formulabox}
+\begin{align}
+  \texttt{hour}_i         &= \text{UTC hour of } t_i \quad \in \{0, \ldots, 23\} \\
+  \texttt{month}_i        &= \text{calendar month of } t_i \quad \in \{1, \ldots, 12\} \\
+  \texttt{is\_summer}_i   &= \mathbf{1}[\texttt{month}_i \in \{6, 7, 8\}] \\
+  \texttt{is\_afternoon}_i &= \mathbf{1}[\texttt{hour}_i \in \{12, \ldots, 18\}]
+\end{align}
+\end{formulabox}
+
+EDA findings:
+\begin{itemize}
+  \item All five airports peak 12--17 UTC (afternoon convective storms driven by solar heating).
+  \item \textbf{Mediterranean regime} (Ajaccio, Bastia, Pise): peak activity June--August.
+  \item \textbf{Atlantic/Po Valley regime} (Biarritz, Nantes): peak activity May.
+  \item Summer afternoon storms tend to be more intense and longer than winter events.
+\end{itemize}
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Group J --- Airport Encoding}
+% ───────────────────────────────────────────────────────────────
+
+\subsubsection*{\feat{airport\_target\_enc}}
+
+Per-airport empirical probability that a CG strike is the last in its segment.
+
+\begin{formulabox}
+\[
+  \texttt{airport\_target\_enc}_i
+  = \frac{\sum_{j: \texttt{airport}_j = a} \mathbf{1}[y_j = 1]}
+         {\sum_{j: \texttt{airport}_j = a} 1}
+  \quad \text{where } a = \texttt{airport}_i
+\]
+\end{formulabox}
+
+Computed from the \textbf{training fold only} in cross-validation --- never from the validation fold. This prevents the feature from leaking validation-set labels. For inference, it is computed from the full training set.
+
+Example: Ajaccio has $\approx 0.0498$ (roughly 1 last strike per 20 CG rows).
+
+\vspace{1em}
+
+% ───────────────────────────────────────────────────────────────
+\subsection{Raw physical features passed directly}
+% ───────────────────────────────────────────────────────────────
+
+These raw columns are passed to LightGBM unchanged to allow the model to discover non-linear threshold effects on its own:
+
+\begin{center}
+\begin{tabular}{L{3.5cm} L{9cm}}
+\toprule
+\textbf{Feature} & \textbf{Meaning} \\
+\midrule
+\texttt{dist}    & Distance of this strike from airport (km) \\
+\texttt{azimuth} & Compass bearing from airport to strike ($^\circ$) \\
+\texttt{maxis}   & Peak current derivative (sensor-specific signal quality indicator) \\
+\texttt{strike\_x}, \texttt{strike\_y} & Cartesian position relative to airport (km East, km North) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\newpage
+
+% ═══════════════════════════════════════════════════════════════
+\section{Feature Validity Matrix}
+% ═══════════════════════════════════════════════════════════════
+
+The central question is: \textit{can a feature be legitimately computed on the test data, and does it introduce leakage of the target?}
+
+\begin{longtable}{L{3.8cm} C{2cm} C{2.2cm} L{4.5cm}}
+\toprule
+\textbf{Feature(s)} & \textbf{Uses future data?} & \textbf{Computable on test?} & \textbf{Notes} \\
+\midrule
+\texttt{amplitude}, \texttt{amp\_magnitude}, \texttt{amp\_is\_positive}
+& No & Yes & Current strike only \\[4pt]
+
+\texttt{seg\_size\_cg}, \texttt{seg\_mean\_*}, \texttt{seg\_duration\_min}, \texttt{seg\_mean\_dist}, \texttt{seg\_pos\_cg\_ratio}
+& Yes --- full segment & Yes --- test gives complete segments & Storm-level aggregate \\[4pt]
+
+\texttt{rank\_in\_seg}, \texttt{pct\_position}
+& Yes --- full segment & Yes & Position, not tautological \\[4pt]
+
+\textbf{\texttt{rank\_rev\_cg}}
+& \textbf{Yes} & \textbf{Yes --- equals 0 for the true last strike}
+& \textcolor{warningcolor}{\textbf{Structural leakage:}} value 0 $\equiv$ is\_last=True \\[4pt]
+
+\texttt{time\_since\_prev}, \texttt{dist\_delta}, \texttt{mag\_delta}, \texttt{storm\_speed}
+& No --- looks backward & Yes & Previous-strike delta \\[4pt]
+
+\texttt{cg\_count\_*}, \texttt{rolling\_mean\_*}, \texttt{rolling\_pos\_ratio\_*}, \texttt{rolling\_mean\_dist\_*}
+& No --- backward window & Yes & Backward rolling window \\[4pt]
+
+\texttt{silence\_over\_10/15/20min}
+& No --- gap before strike & Yes & Not tautological (many false positives) \\[4pt]
+
+\texttt{silence\_x\_dist\_away}, \texttt{weak\_and\_moving\_away}
+& Partially & Yes & Interaction of backward features \\[4pt]
+
+\texttt{outer\_ring\_cg\_10min}
+& No --- backward 10-min & Yes & External context \\[4pt]
+
+\texttt{hour}, \texttt{month}, \texttt{is\_summer}, \texttt{is\_afternoon}
+& No & Yes & Calendar \\[4pt]
+
+\texttt{airport\_target\_enc}
+& No (CV-safe) & Yes --- from training set & Encoding \\[4pt]
+
+\texttt{dist}, \texttt{azimuth}, \texttt{maxis}, \texttt{strike\_x}, \texttt{strike\_y}
+& No & Yes & Raw physical \\
+\bottomrule
+\end{longtable}
+
+\newpage
+
+% ═══════════════════════════════════════════════════════════════
+\section{The Leakage Problem: What the Model Actually Learned}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{Observed performance}
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{CV Fold} & \textbf{AUC} & \textbf{F1} & \textbf{Brier} \\
+\midrule
+Fold 1 & 1.00000 & 0.9953 & 0.000265 \\
+Fold 2 & 0.99999 & 0.9934 & 0.000532 \\
+Fold 3 & 0.99999 & 0.9943 & 0.000454 \\
+Fold 4 & 0.99999 & 0.9906 & 0.000649 \\
+Fold 5 & 1.00000 & 0.9962 & 0.000293 \\
+\midrule
+Temporal stress test (train $\leq$ 2020, val $\geq$ 2021) & 1.00000 & 0.9983 & 0.000254 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Root cause}
+
+The model learned a two-split rule equivalent to:
+
+\begin{lstlisting}
+if rank_rev_cg == 0:
+    predict confidence = 0.9999  # last strike
+else:
+    predict confidence = 0.0005  # not last
+\end{lstlisting}
+
+This is not overfitting (scores are consistent across all folds and across the temporal split). It is \textbf{structural leakage}: the feature \texttt{rank\_rev\_cg} is mathematically equivalent to the target when computed on complete segments.
+
+OOF prediction distribution:
+\[
+  \overline{\hat{y}}_{\text{is\_last=True}} = 0.9991, \quad
+  \overline{\hat{y}}_{\text{is\_last=False}} = 0.0005
+\]
+
+\subsection{The trade-off to decide on}
+
+\begin{center}
+\begin{tabular}{L{3cm} L{5.5cm} L{5.5cm}}
+\toprule
+& \textbf{Keep \texttt{rank\_rev\_cg}} & \textbf{Remove \texttt{rank\_rev\_cg}} \\
+\midrule
+AUC & $\approx 1.00$ & $\approx 0.83$--$0.90$ \\
+Competition gain & 30 min/alert (maximum) & Potentially $> 30$ min if model predicts end earlier \\
+Competition risk & Near 0\% & Depends on threshold \\
+What the model learns & ``Count from end of list'' & Storm physics, spatial decay, temporal gaps \\
+SHAP explainability & Trivial & Meaningful \\
+Evaluator impression & Suspicious (AUC=1.0) & Credible \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\newpage
+
+% ═══════════════════════════════════════════════════════════════
+\section{Sentinel Values for Single-Strike Segments}
+% ═══════════════════════════════════════════════════════════════
+
+A single-strike segment (exactly one CG strike, immediately followed by 30 min of silence) has \texttt{NaN} for all Group D and E lag/rolling features because no previous strike exists. These are filled with sentinels that encode ``first and only strike'' semantics:
+
+\begin{center}
+\begin{tabular}{lrl}
+\toprule
+\textbf{Feature} & \textbf{Sentinel value} & \textbf{Interpretation} \\
+\midrule
+\texttt{time\_since\_prev} & 99999 & Very long prior silence (unknown origin) \\
+\texttt{dist\_delta}       & 0 & No movement information \\
+\texttt{mag\_delta}        & 0 & No amplitude change information \\
+\texttt{storm\_speed}      & 0 & No movement information \\
+\texttt{cg\_count\_10min}  & 1 & Only 1 known strike \\
+\texttt{cg\_count\_30min}  & 1 & Only 1 known strike \\
+\texttt{rolling\_pos\_ratio\_10min} & 0 & No prior ratio \\
+\texttt{rolling\_mean\_mag\_10min}  & dataset median & Neutral (data-driven) \\
+\texttt{rolling\_mean\_dist\_10min} & dataset median & Neutral (data-driven) \\
+\texttt{silence\_over\_10/15/20min} & 0 & No prior silence observed \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{1em}
+
+% ═══════════════════════════════════════════════════════════════
+\section{Summary of All Features}
+% ═══════════════════════════════════════════════════════════════
+
+\begin{longtable}{L{3.8cm} C{1.4cm} L{8.5cm}}
+\toprule
+\textbf{Feature} & \textbf{Group} & \textbf{Formula / Definition} \\
+\midrule
+\texttt{amplitude}               & A & Raw signed discharge current $a_i$ (kA) \\
+\texttt{amp\_magnitude}          & A & $|a_i|$ \\
+\texttt{amp\_is\_positive}       & A & $\mathbf{1}[a_i > 0]$ \\
+\midrule
+\texttt{seg\_size\_cg}           & B & $N_s$ = total CG strikes in segment \\
+\texttt{seg\_mean\_amp}          & B & $\frac{1}{N_s}\sum_{j\in\mathcal{S}} a_j$ \\
+\texttt{seg\_mean\_mag}          & B & $\frac{1}{N_s}\sum_{j\in\mathcal{S}} |a_j|$ \\
+\texttt{seg\_duration\_min}      & B & $(t_{\max} - t_{\min})/60$ [min] \\
+\texttt{seg\_mean\_dist}         & B & $\frac{1}{N_s}\sum_{j\in\mathcal{S}} d_j$ [km] \\
+\texttt{seg\_pos\_cg\_ratio}     & B & $\frac{1}{N_s}\sum_{j\in\mathcal{S}} \mathbf{1}[a_j>0]$ \\
+\midrule
+\texttt{rank\_in\_seg}           & C & $r_i$ (0-indexed forward rank in segment) \\
+\texttt{pct\_position}           & C & $r_i / N_s$ \\
+\texttt{rank\_rev\_cg}           & C & $(N_s-1) - r_i$ \quad \textcolor{warningcolor}{(0 = last strike)} \\
+\midrule
+\texttt{time\_since\_prev}       & D & $t_i - t_{i-1}$ [s] \\
+\texttt{dist\_delta}             & D & $d_i - d_{i-1}$ [km] \\
+\texttt{mag\_delta}              & D & $|a_i| - |a_{i-1}|$ [kA] \\
+\texttt{storm\_speed}            & D/E & $\sqrt{(\Delta x_i)^2 + (\Delta y_i)^2}$ [km] \\
+\midrule
+\texttt{cg\_count\_10min}        & E & $|\{j\in\mathcal{S}: t_i{-}600 < t_j \leq t_i\}|$ \\
+\texttt{cg\_count\_30min}        & E & $|\{j\in\mathcal{S}: t_i{-}1800 < t_j \leq t_i\}|$ \\
+\texttt{rolling\_mean\_mag\_10min}& E & Mean $|a_j|$ over last 10 min in segment \\
+\texttt{rolling\_pos\_ratio\_10min}& E & Mean $\mathbf{1}[a_j>0]$ over last 10 min \\
+\texttt{rolling\_mean\_dist\_10min}& E & Mean $d_j$ over last 10 min in segment \\
+\midrule
+\texttt{silence\_over\_10min}    & F & $\mathbf{1}[\texttt{time\_since\_prev}_i > 600]$ \\
+\texttt{silence\_over\_15min}    & F & $\mathbf{1}[\texttt{time\_since\_prev}_i > 900]$ \\
+\texttt{silence\_over\_20min}    & F & $\mathbf{1}[\texttt{time\_since\_prev}_i > 1200]$ \\
+\midrule
+\texttt{silence\_x\_dist\_away}  & G & $\texttt{silence\_over\_15min}_i \times \mathbf{1}[\texttt{dist\_delta}_i>0]$ \\
+\texttt{weak\_and\_moving\_away} & G & $\mathbf{1}[|a_i| < \overline{|a|}_s] \times \mathbf{1}[\texttt{dist\_delta}_i>0]$ \\
+\midrule
+\texttt{outer\_ring\_cg\_10min}  & K & CG count in 20--50 km zone, last 10 min \\
+\midrule
+\texttt{hour}                    & I & UTC hour $\in \{0,\ldots,23\}$ \\
+\texttt{month}                   & I & Calendar month $\in \{1,\ldots,12\}$ \\
+\texttt{is\_summer}              & I & $\mathbf{1}[\text{month} \in \{6,7,8\}]$ \\
+\texttt{is\_afternoon}           & I & $\mathbf{1}[\text{hour} \in \{12,\ldots,18\}]$ \\
+\midrule
+\texttt{maxis}                   & raw & Peak current derivative \\
+\texttt{dist}                    & raw & Distance from airport (km) \\
+\texttt{azimuth}                 & raw & Bearing from airport ($^\circ$) \\
+\texttt{strike\_x}               & raw & $d_i \sin(\alpha_i)$ (km East) \\
+\texttt{strike\_y}               & raw & $d_i \cos(\alpha_i)$ (km North) \\
+\midrule
+\texttt{airport\_target\_enc}    & J  & Per-airport mean(is\_last) from training fold \\
+\bottomrule
+\caption{Complete feature list (37 features passed to LightGBM)}
+\end{longtable}
+
+\end{document}

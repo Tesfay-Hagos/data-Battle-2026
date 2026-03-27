@@ -73,6 +73,14 @@ run-final-eda:
 	MPLBACKEND=Agg $(PYTHON) $(NBDIR)/03_final_eda_and_features.py
 	@echo "Done. Figures saved to outputs/figures/"
 
+## ── compare: run model comparison (LR vs XGBoost vs LightGBM) ───────────────
+.PHONY: compare
+compare:
+	@echo "══════════════════════════════════════════════════"
+	@echo " Model Comparison: LR vs XGBoost vs LightGBM"
+	@echo "══════════════════════════════════════════════════"
+	MPLBACKEND=Agg $(PYTHON) $(SRCDIR)/compare_models.py
+
 ## ── tune: Optuna hyperparameter search ──────────────────────────────────────
 .PHONY: tune
 tune:
@@ -156,6 +164,9 @@ clean:
 help:
 	@echo ""
 	@echo "DataBattle 2026 — available make targets:"
+	@echo ""
+	@echo "  Model comparison:"
+	@echo "    make compare         LR vs XGBoost vs LightGBM (same folds + energy)"
 	@echo ""
 	@echo "  Hyperparameter search (run before pipeline):"
 	@echo "    make tune            Optuna search → outputs/saves/best_params.json"

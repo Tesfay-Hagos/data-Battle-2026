@@ -64,7 +64,8 @@ required = {
     "train.py"      : os.path.join(PROJECT_ROOT, "src", "train.py"),
     "evaluate.py"   : os.path.join(PROJECT_ROOT, "src", "evaluate.py"),
     "predict.py"    : os.path.join(PROJECT_ROOT, "src", "predict.py"),
-    "tune.py"       : os.path.join(PROJECT_ROOT, "src", "tune.py"),
+    "tune.py"           : os.path.join(PROJECT_ROOT, "src", "tune.py"),
+    "compare_models.py" : os.path.join(PROJECT_ROOT, "src", "compare_models.py"),
 }
 
 all_ok = True
@@ -123,13 +124,15 @@ from features import build_all_features, FEATURE_COLS   # noqa: F401
 from train    import train                               # noqa: F401
 from evaluate import full_report, oof_gain_risk_report    # noqa: F401
 from predict  import predict                             # noqa: F401
-from tune     import tune                                # noqa: F401
+from tune          import tune                           # noqa: F401
+from compare_models import compare                       # noqa: F401
 
-print("✅ features.py  imported")
-print("✅ train.py     imported")
-print("✅ evaluate.py  imported")
-print("✅ predict.py   imported")
-print("✅ tune.py      imported")
+print("✅ features.py       imported")
+print("✅ train.py          imported")
+print("✅ evaluate.py       imported")
+print("✅ predict.py        imported")
+print("✅ tune.py           imported")
+print("✅ compare_models.py imported")
 print()
 print("Ready — run Cell 0.6 (optional tuning) or Cell 1 to start training.")
 
@@ -234,6 +237,21 @@ else:
     print(f"  CO₂ equivalent: {emissions_kg * 1000:.1f} g")
     print(f"  ≈ {km_driven:.2f} km driven by a typical petrol car")
     print(f"  Report file   : {carbon_files[-1]}")
+
+# %% [markdown]
+# ## Cell 1.6 — Model comparison (LR vs XGBoost vs LightGBM)
+#
+# Trains all three models under identical conditions (same GroupKFold splits,
+# same feature set) and measures AUC, F1, Brier, training time, and CO₂.
+#
+# **Outputs:**
+# - `outputs/saves/model_comparison.csv`
+# - `outputs/figures/model_comparison.png`
+#
+# ⏱ Runtime: ~15–30 min on Colab CPU (XGBoost is the slowest)
+
+# %%
+compare()
 
 # %% [markdown]
 # ## Cell 2.1 — OOF evaluation report
