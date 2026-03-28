@@ -212,7 +212,7 @@ axes[3].legend()
 
 plt.suptitle("PART 1 · Data Structure", fontsize=14, y=1.02)
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p1_data_structure.png")
+save_to_drive(fig, FIG_DIR_EDA / "p1_data_structure.png")
 plt.show()
 
 # %% ADD 1 — Single-row segment analysis and NaN sentinel fill
@@ -326,7 +326,7 @@ axes[2].text(0.05, 0.88,
 
 plt.suptitle("PART 2 · Target Analysis", fontsize=14, y=1.02)
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p2_target_analysis.png")
+save_to_drive(fig, FIG_DIR_EDA / "p2_target_analysis.png")
 plt.show()
 
 # %% [markdown]
@@ -374,7 +374,7 @@ for i, (feat, label, xlim) in enumerate(features_to_plot):
 plt.suptitle("PART 3 · Raw Feature Distributions (True vs False)",
              fontsize=14, y=1.01)
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p3_raw_feature_distributions.png")
+save_to_drive(fig, FIG_DIR_EDA / "p3_raw_feature_distributions.png")
 plt.show()
 
 # %% 3B: Amplitude sign analysis
@@ -407,7 +407,7 @@ ax_polar.set_title("ADD 4 · Strike Direction from Airport\n"
                    "(True vs False — does direction matter at last strike?)",
                    pad=20)
 ax_polar.legend(loc="lower right", title="Last CG?")
-save_to_drive(fig, FIG_DIR / "add4_azimuth_polar.png")
+save_to_drive(fig, FIG_DIR_EDA / "add4_azimuth_polar.png")
 plt.show()
 
 # %% 3C: Strike type and temporal coverage
@@ -434,7 +434,7 @@ axes[1].set_ylabel("# CG Strikes")
 axes[1].tick_params(axis="x", rotation=45)
 
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p3_feature_context.png")
+save_to_drive(fig, FIG_DIR_EDA / "p3_feature_context.png")
 plt.show()
 
 # %% [markdown]
@@ -498,7 +498,7 @@ axes[2].axvline(30, color="black", linestyle="--", alpha=0.5,
 plt.suptitle("PART 4 · Storm Lifecycle — Position & Timing",
              fontsize=14, y=1.02)
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p4_storm_lifecycle_timing.png")
+save_to_drive(fig, FIG_DIR_EDA / "p4_storm_lifecycle_timing.png")
 plt.show()
 
 # %% 4C: Biarritz storm #1 — the clearest example of storm decay pattern
@@ -566,7 +566,7 @@ axes[2].set_title("Inter-strike silence — 29-min gap before storm weakly resum
 axes[2].legend()
 
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p4_biarritz_storm_lifecycle.png")
+save_to_drive(fig, FIG_DIR_EDA / "p4_biarritz_storm_lifecycle.png")
 plt.show()
 
 # %% ADD 3 — Part 4D: Business value chart (time saved per storm)
@@ -635,7 +635,7 @@ axes[2].fill_between(range(len(savings_df_sorted)),
                      alpha=0.2, color="#3498DB")
 
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "add3_business_value.png")
+save_to_drive(fig, FIG_DIR_EDA / "add3_business_value.png")
 plt.show()
 
 save_to_drive(savings_df, SAVES_DIR / "time_savings_per_storm.csv")
@@ -688,7 +688,7 @@ for ax in axes.flatten()[len(sample_segs):]:
     ax.set_visible(False)
 
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "add5_storm_gallery.png")
+save_to_drive(fig, FIG_DIR_EDA / "add5_storm_gallery.png")
 plt.show()
 
 # %% [markdown]
@@ -780,7 +780,7 @@ axes[1,2].tick_params(axis="x", rotation=30)
 
 plt.suptitle("PART 5 · Airport Profiles", fontsize=14, y=1.01)
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p5_airport_profiles.png")
+save_to_drive(fig, FIG_DIR_EDA / "p5_airport_profiles.png")
 plt.show()
 
 # %% [markdown]
@@ -1028,7 +1028,7 @@ ax.set_title("PART 7 · Feature Correlation Matrix\n"
              "Flag pairs |r| > 0.85 for redundancy review",
              fontsize=13)
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p7_correlation_matrix.png")
+save_to_drive(fig, FIG_DIR_EDA / "p7_correlation_matrix.png")
 plt.show()
 
 # %% 7B: Feature vs target signal strength (point-biserial correlation)
@@ -1063,7 +1063,7 @@ ax.set_title("P7 · Feature Signal Strength\n"
              "(Higher = stronger predictor of last CG strike)")
 ax.legend()
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p7_feature_signal_strength.png")
+save_to_drive(fig, FIG_DIR_EDA / "p7_feature_signal_strength.png")
 plt.show()
 
 # %% [markdown]
@@ -1296,7 +1296,7 @@ axes[1].pie(
 axes[1].set_title("Composition of df_outside\n(450K rows with NaN alert_id)")
 
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p9a_data_audit_alert_id.png")
+save_to_drive(fig, FIG_DIR_EDA / "p9a_data_audit_alert_id.png")
 plt.show()
 
 # %% [markdown]
@@ -1380,7 +1380,7 @@ axes[1].set_xlabel("Year")
 axes[1].set_ylabel("Airport")
 
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p9b_storm_volume_by_year.png")
+save_to_drive(fig, FIG_DIR_EDA / "p9b_storm_volume_by_year.png")
 plt.show()
 save_to_drive(yearly_counts, SAVES_DIR / "storm_volume_per_airport_year.csv")
 
@@ -1491,7 +1491,7 @@ axes[2].set_title("Median vs 95th Percentile Strikes\n"
 axes[2].legend()
 
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p9c_storm_intensity_per_airport.png")
+save_to_drive(fig, FIG_DIR_EDA / "p9c_storm_intensity_per_airport.png")
 plt.show()
 save_to_drive(strike_summary.reset_index(), SAVES_DIR / "storm_intensity_summary.csv")
 
@@ -1592,7 +1592,7 @@ for ax, ap in zip(axes.flatten(), airports):
 axes.flatten()[-1].set_visible(False)
 
 plt.tight_layout()
-save_to_drive(fig, FIG_DIR / "p9d_danger_windows_per_airport.png")
+save_to_drive(fig, FIG_DIR_EDA / "p9d_danger_windows_per_airport.png")
 plt.show()
 
 # %% 9D-summary: Danger window table — jury-ready

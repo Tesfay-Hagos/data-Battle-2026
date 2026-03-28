@@ -3,7 +3,7 @@
 #
 # This notebook explains **why** the LightGBM model makes its predictions.
 #
-# **Outputs** (all saved to `outputs/figures/`):
+# **Outputs** (all saved to `outputs/figures/shap/`):
 # - `shap_summary_bar.png` — global feature importance (top 20)
 # - `shap_beeswarm.png` — how each feature pushes predictions high/low
 # - `shap_dependence_top3.png` — dependence plots for the 3 most important features
@@ -41,7 +41,7 @@ from features import FEATURE_COLS, GROUP_COL, TARGET, build_all_features  # noqa
 
 MODELS_DIR = ROOT / "outputs" / "models"
 SAVES_DIR  = ROOT / "outputs" / "saves"
-FIGDIR     = ROOT / "outputs" / "figures"
+FIGDIR     = ROOT / "outputs" / "figures" / "shap"
 DATA_PATH  = ROOT / "data" / "segment_alerts_all_airports_train.csv"
 
 FIGDIR.mkdir(parents=True, exist_ok=True)

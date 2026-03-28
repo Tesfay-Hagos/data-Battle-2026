@@ -49,7 +49,7 @@ from features import FEATURE_COLS, GROUP_COL, TARGET, build_all_features  # noqa
 
 DATA_PATH  = ROOT / "data" / "segment_alerts_all_airports_train.csv"
 SAVES_DIR  = ROOT / "outputs" / "saves"
-FIGDIR     = ROOT / "outputs" / "figures"
+FIGDIR     = ROOT / "outputs" / "figures" / "model-comparison"
 LOGS_DIR   = ROOT / "outputs" / "logs"
 
 for d in [SAVES_DIR, FIGDIR, LOGS_DIR]:

@@ -246,7 +246,7 @@ else:
 #
 # **Outputs:**
 # - `outputs/saves/model_comparison.csv`
-# - `outputs/figures/model_comparison.png`
+# - `outputs/figures/model-comparison/model_comparison.png`
 #
 # ⏱ Runtime: ~15–30 min on Colab CPU (XGBoost is the slowest)
 
@@ -347,7 +347,7 @@ else:
 # %% [markdown]
 # ## Cell 5 — SHAP Explainability
 #
-# Generates SHAP explanation plots and saves them to `outputs/figures/`.
+# Generates SHAP explanation plots and saves them to `outputs/figures/shap/`.
 # **Requires trained models** (run Cell 1 first).
 #
 # Saves:
@@ -373,7 +373,7 @@ else:
     print(f"▶  Running: {SHAP_NB}")
     runpy.run_path(SHAP_NB, run_name="__main__")
     print()
-    FIGDIR = os.path.join(PROJECT_ROOT, "outputs", "figures")
+    FIGDIR = os.path.join(PROJECT_ROOT, "outputs", "figures", "shap")
     shap_figs = [f for f in os.listdir(FIGDIR) if f.startswith("shap_") and f.endswith(".png")]
     print(f"✅ {len(shap_figs)} SHAP figures saved to {FIGDIR}:")
     for f in sorted(shap_figs):
