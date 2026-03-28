@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    image: databattle2026-app
+    ports:
+      - "8501:8501"
+    environment:
+      - DATABATTLE_ROOT=/app
+      - MPLBACKEND=Agg
+    restart: unless-stopped
+    # NOTE: No volume mounts — outputs/ and data/ are baked into the image.
+    # For local development iteration, uncomment the lines below to reflect
+    # local changes without rebuilding the image:
+    #
+    # volumes:
+    #   - ./data:/app/data
+    #   - ./outputs:/app/outputs

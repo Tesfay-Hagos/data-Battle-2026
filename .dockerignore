@@ -1,0 +1,16 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+notebooks/
+report/
+*.ipynb
+dataset_test/
+computition-launch-post.txt
+segment_alerts_all_airports_train.csv
+# outputs/submissions is empty — no need to include
+outputs/submissions/
+# Keep outputs/models, outputs/figures, outputs/saves, outputs/logs

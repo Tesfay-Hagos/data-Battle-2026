@@ -169,11 +169,18 @@ for name, path in PATHS.items():
 
 # Convenience aliases used throughout notebooks
 DATA_DIR   = PATHS["data"]
-FIG_DIR    = PATHS["figures"]
+FIG_DIR    = PATHS["figures"]          # base figures dir (kept for back-compat)
 SAVES_DIR  = PATHS["saves"]
 MODELS_DIR = PATHS["models"]
 SUBS_DIR   = PATHS["submissions"]
 LOGS_DIR   = PATHS["logs"]
+
+# Per-step figure sub-folders — each step saves here so outputs are easy to find
+FIG_DIR_EDA         = FIG_DIR / "eda"               # notebooks 01 & 03
+FIG_DIR_COMPARISON  = FIG_DIR / "model-comparison"  # notebook 06 / compare_models.py
+FIG_DIR_SHAP        = FIG_DIR / "shap"              # notebook 05
+for _d in [FIG_DIR_EDA, FIG_DIR_COMPARISON, FIG_DIR_SHAP]:
+    _d.mkdir(parents=True, exist_ok=True)
 
 TRAIN_CSV  = DATA_DIR / "segment_alerts_all_airports_train.csv"
 
