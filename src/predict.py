@@ -104,7 +104,7 @@ def predict(test_path: str | Path, output_path: str | Path) -> pd.DataFrame:
 
     # ── 1. Load test data and build features ──────────────────────────────────
     print(f"\n📂 Loading test data: {test_path}")
-    df_raw = pd.read_csv(test_path)
+    df_raw = pd.read_csv(test_path, sep=None, engine="python", on_bad_lines="skip")
     print(f"   Raw rows: {len(df_raw):,}")
 
     print("\n⚙️  Building features...")

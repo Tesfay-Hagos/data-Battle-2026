@@ -125,6 +125,11 @@ st.markdown("""
   <p>Lightning Storm End Prediction &nbsp;·&nbsp;
      Five French Airports &nbsp;·&nbsp;
      LightGBM &nbsp;·&nbsp; SHAP &nbsp;·&nbsp; Streamlit</p>
+  <p style="margin-top:.9rem; font-size:.95rem; color:#d4e8f7;">
+    👥 &nbsp;<strong style="color:#ffffff;">Tesfay Hagos Weldegebriel</strong>
+    &nbsp;&nbsp;·&nbsp;&nbsp;
+    <strong style="color:#ffffff;">Fisha Mehabaw Alemayoh</strong>
+  </p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -132,14 +137,19 @@ st.markdown("""
 st.markdown('<div class="section-header">1 · Objective</div>', unsafe_allow_html=True)
 
 st.markdown("""
-Airport ground operations halt whenever a thunderstorm is active within a **5 km safety
-perimeter**. The industry rule is to wait 30 minutes of silence before clearing the
+Airport ground operations halt whenever a cloud-to-ground (CG) lightning strike occurs
+within a **20 km alert zone** around the airport. Strikes in the surrounding
+**20–50 km outer ring** are also monitored as early warning context.
+The industry rule is to wait **30 minutes of silence** before clearing the
 apron — a conservative threshold that causes measurable delays and economic cost.
 
 **The challenge:** given a sequence of cloud-to-ground (CG) lightning strikes recorded
 at five French airports (Ajaccio, Bastia, Biarritz, Nantes, Pise), predict for each
-strike the **probability that it is the last one before 30 minutes of silence** —
-enabling earlier, data-driven all-clear decisions.
+strike the **probability that it is the last one before 30 minutes of silence**.
+
+The median storm alert lasts only **9 minutes**. By identifying the true last strike in
+real time, the model can issue the all-clear **5–15 minutes earlier** than the fixed
+30-minute rule — without waiting for the full silence window to expire.
 """)
 
 st.markdown("""
