@@ -35,9 +35,14 @@ DRIVE_SRC  := gdrive:databattle2026/src
 TEST_DATA := /home/tesfayh/Documents/projects/personal/data-computition/dataset_test/dataset_set.csv
 SUBMISSION := outputs/submissions/predictions.csv
 
-## ── install: install all Python dependencies ────────────────────────────────
+## ── install: create venv if needed, then install all Python dependencies ─────
 .PHONY: install
 install:
+	@if [ ! -f "$(PYTHON)" ]; then \
+		echo "Creating virtual environment at ../.venv …"; \
+		python3 -m venv ../.venv; \
+	fi
+	$(PIP) install --upgrade pip --quiet
 	$(PIP) install -r requirements.txt
 	$(PIP) install jupytext --upgrade
 
@@ -69,7 +74,7 @@ check-all:
 	@echo " Syntax check — src/ + notebooks/ + app/"
 	@echo "════════════════════════════════════════════════"
 	@pass=0; fail=0; \
-	for f in $(NBDIR)/0*.py $(SRCDIR)/*.py app/main.py app/utils/loaders.py app/pages/*.py; do \
+	for f in $(NBDIR)/0*.py $(SRCDIR)/*.py app/Home.py app/utils/loaders.py app/pages/*.py; do \
 		result=$$($(PYTHON) -m py_compile "$$f" 2>&1); \
 		if [ $$? -eq 0 ]; then \
 			echo "  OK   $$f"; pass=$$((pass+1)); \
@@ -218,12 +223,24 @@ clean:
 	rm -f $(FIGDIR)/shap/*.png
 	@echo "Cleaned generated files."
 
-## ── app-local: run Streamlit dashboard locally (no Docker) ──────────────────
-.PHONY: app-local
-app-local:
-	@echo "Starting Streamlit dashboard at http://localhost:8501 …"
+## ── app: install deps if needed, then run Streamlit dashboard locally ────────
+## Clone the repo and run `make app` — that's all.
+.PHONY: app
+app:
+	@if [ ! -f "$(PYTHON)" ]; then \
+		echo "Virtual environment not found — running make install first …"; \
+		$(MAKE) install; \
+	fi
+	@if ! $(PYTHON) -c "import streamlit" 2>/dev/null; then \
+		echo "Dependencies not installed — running make install first …"; \
+		$(MAKE) install; \
+	fi
+	@echo ""
+	@echo "  ⚡ DataBattle 2026 — starting dashboard"
+	@echo "  Local:    http://localhost:8501"
+	@echo ""
 	DATABATTLE_ROOT=$(shell pwd) MPLBACKEND=Agg \
-	$(PYTHON) -m streamlit run app/main.py \
+	$(PYTHON) -m streamlit run app/Home.py \
 		--server.port=8501 \
 		--browser.gatherUsageStats=false
 
@@ -233,11 +250,11 @@ app-build:
 	@echo "Building Docker image (includes outputs/ and data/) …"
 	docker build -t databattle2026-app .
 
-## ── app: run the pre-built Docker image ─────────────────────────────────────
+## ── app-docker: run the pre-built Docker image ──────────────────────────────
 ## Uses --network host (Linux) so the external IP is accessible directly.
 ## If on Mac/Windows replace --network host with -p 8501:8501
-.PHONY: app
-app:
+.PHONY: app-docker
+app-docker:
 	@echo "Starting Docker container …"
 	@echo "Local:    http://localhost:8501"
 	@echo "External: http://$$(hostname -I | awk '{print $$1}'):8501"
@@ -288,9 +305,9 @@ help:
 	@echo "    make pull-drive      Pull notebooks + figures from Google Drive"
 	@echo ""
 	@echo "  Dashboard:"
-	@echo "    make app-local       Run Streamlit app locally (no Docker)"
+	@echo "    make app             Install deps if needed + run Streamlit locally"
 	@echo "    make app-build       Build Docker image (outputs/ baked in)"
-	@echo "    make app             Run Docker image at localhost:8501"
+	@echo "    make app-docker      Run Docker image at localhost:8501"
 	@echo "    make app-stop        Stop running Docker container"
 	@echo ""
 	@echo "  Other:"

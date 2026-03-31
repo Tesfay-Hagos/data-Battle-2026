@@ -65,6 +65,15 @@ def load_carbon() -> pd.DataFrame | None:
 
 
 @st.cache_data(show_spinner=False)
+def load_carbon_training() -> pd.DataFrame | None:
+    """Full training run CodeCarbon report (carbon_report.csv)."""
+    path = LOGS_DIR / "carbon_report.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+
+@st.cache_data(show_spinner=False)
 def load_train_sample(n: int = 5_000) -> pd.DataFrame | None:
     """Small random sample of the training CSV for quick EDA widgets."""
     if not DATA_PATH.exists():
