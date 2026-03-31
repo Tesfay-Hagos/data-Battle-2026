@@ -25,6 +25,53 @@ make app-build    # build the image (outputs baked in)
 make app-docker   # run at localhost:8501
 ```
 
+### Option C — No `make` available (Windows / plain terminal)
+
+```bash
+# 1. Clone the repo
+git clone <repo-url>
+cd data-Battle-2026
+
+# 2. Create virtual environment
+python3 -m venv ../.venv
+
+# 3. Activate it
+#    Linux / macOS:
+source ../.venv/bin/activate
+#    Windows (Command Prompt):
+..\\.venv\\Scripts\\activate.bat
+#    Windows (PowerShell):
+..\\.venv\\Scripts\\Activate.ps1
+
+# 4. Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 5. Launch the dashboard
+DATABATTLE_ROOT=$(pwd) streamlit run app/Home.py --server.port=8501
+#    Windows:
+#    set DATABATTLE_ROOT=%cd% && streamlit run app/Home.py --server.port=8501
+```
+
+Open [http://localhost:8501](http://localhost:8501)
+
+**Reproduce results without `make`:**
+
+```bash
+# Feature engineering + train LightGBM (5-fold CV)
+python src/train.py
+
+# Model comparison (LR vs XGBoost vs LightGBM)
+python src/compare_models.py
+
+# SHAP explainability figures
+python src/evaluate.py
+
+# Generate predictions.csv
+python src/predict.py --test data/segment_alerts_all_airports_train.csv \
+                      --output outputs/submissions/predictions.csv
+```
+
 ---
 
 ## Dashboard Commands
