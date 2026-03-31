@@ -5,9 +5,6 @@ data/
 *.pkl
 *.h5
 
-# ── Generated outputs (Drive is source of truth) ─────────────────────────
-outputs/
-
 # ── Notebooks (exploratory only — source code lives in src/) ─────────────
 notebooks/
 
