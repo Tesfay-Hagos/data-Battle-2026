@@ -8,14 +8,8 @@ data/
 # ── Generated outputs (Drive is source of truth) ─────────────────────────
 outputs/
 
-# ── Notebooks auto-generated from .py (jupytext) ─────────────────────────
-# Keep .py (authoritative), exclude auto-built .ipynb
-notebooks/*.ipynb
-notebooks/data/
-notebooks/.ipynb_checkpoints/
-
-# ── Internal planning docs (not for submission) ───────────────────────────
-notebooks/DATABATTLE_2026_BUILD_PLAN.md
+# ── Notebooks (exploratory only — source code lives in src/) ─────────────
+notebooks/
 
 # ── LaTeX build artefacts (keep .tex and .pdf, discard build leftovers) ──
 report/*.aux
