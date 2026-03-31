@@ -8,8 +8,25 @@ data/
 # ── Generated outputs (Drive is source of truth) ─────────────────────────
 outputs/
 
-# ── Notebooks auto-generated from .py ────────────────────────────────────
-notebooks/__pycache__/
+# ── Notebooks auto-generated from .py (jupytext) ─────────────────────────
+# Keep .py (authoritative), exclude auto-built .ipynb
+notebooks/*.ipynb
+notebooks/data/
+notebooks/.ipynb_checkpoints/
+
+# ── Internal planning docs (not for submission) ───────────────────────────
+notebooks/DATABATTLE_2026_BUILD_PLAN.md
+
+# ── LaTeX build artefacts (keep .tex and .pdf, discard build leftovers) ──
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.nav
+report/*.snm
+report/*.synctex.gz
+report/*.fls
+report/*.fdb_latexmk
 
 # ── Python ────────────────────────────────────────────────────────────────
 .venv/
@@ -20,10 +37,9 @@ __pycache__/
 dist/
 build/
 
-# ── Jupyter ───────────────────────────────────────────────────────────────
-.ipynb_checkpoints/
-
-# ── OS / editors ──────────────────────────────────────────────────────────
+# ── Misc ──────────────────────────────────────────────────────────────────
+=1.28
+report.zip
 .DS_Store
 .idea/
 .vscode/

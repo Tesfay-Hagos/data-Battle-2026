@@ -1,7 +1,0 @@
-\beamer@sectionintoc {1}{Problem \& Business Context}{3}{0}{1}
-\beamer@sectionintoc {2}{Data Analysis \& Feature Engineering}{5}{0}{2}
-\beamer@sectionintoc {3}{Model Comparison}{9}{0}{3}
-\beamer@sectionintoc {4}{Explainability}{11}{0}{4}
-\beamer@sectionintoc {5}{Social \& Environmental Impact}{14}{0}{5}
-\beamer@sectionintoc {6}{Solution Architecture \& Deployment}{17}{0}{6}
-\beamer@sectionintoc {7}{Results \& Conclusion}{18}{0}{7}
