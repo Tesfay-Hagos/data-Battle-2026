@@ -12,15 +12,10 @@ outputs/
 notebooks/
 
 # ── LaTeX build artefacts (keep .tex and .pdf, discard build leftovers) ──
-report/*.aux
-report/*.log
-report/*.out
-report/*.toc
-report/*.nav
-report/*.snm
-report/*.synctex.gz
-report/*.fls
-report/*.fdb_latexmk
+report/
+notebooks/
+*.tex
+report/*.pdf
 
 # ── Python ────────────────────────────────────────────────────────────────
 .venv/
