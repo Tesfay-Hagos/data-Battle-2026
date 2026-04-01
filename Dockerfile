@@ -20,8 +20,9 @@ COPY env_setup.py .
 # fully self-contained — judges run `docker run` with no extra setup.
 # Run `make train && make run-compare && make run-shap` locally first,
 # then `make app-build` to package everything into the image.
-COPY outputs/   outputs/
-COPY data/      data/
+COPY outputs/      outputs/
+COPY data/         data/
+COPY dataset_test/ dataset_test/
 
 # Tell the app where the project root is
 ENV DATABATTLE_ROOT=/app

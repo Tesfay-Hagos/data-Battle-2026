@@ -174,6 +174,57 @@ def predict(test_path: str | Path, output_path: str | Path) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# In-memory variant (used by interactive Live Prediction tab)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def predict_from_df(df_raw: pd.DataFrame, output_path: str | Path | None = None) -> pd.DataFrame:
+    """
+    Same as predict() but accepts a DataFrame directly instead of reading a file.
+    Used by the interactive Live Prediction tab to avoid temp file I/O.
+
+    Parameters
+    ----------
+    df_raw      : raw DataFrame (same schema as training CSV, no target column needed)
+    output_path : optional path to save submission CSV; skipped if None
+
+    Returns
+    -------
+    submission DataFrame with columns:
+        airport, airport_alert_id, prediction_date, predicted_date_end_alert, confidence
+    """
+    df = build_all_features(df_raw, fit_data=None)
+
+    train_enc = _load_train_airport_encoding(TRAIN_DATA)
+    df["airport_target_enc"] = df["airport"].map(train_enc).astype(float)
+
+    cat_features = ["airport_cat"] if "airport_cat" in df.columns else []
+    X = df[FEATURE_COLS].copy()
+    if cat_features:
+        X["airport_cat"] = df["airport_cat"]
+
+    models = _load_fold_models(MODELS_DIR)
+    probs  = np.zeros((len(df), len(models)))
+    for i, model in enumerate(models, start=1):
+        probs[:, i - 1] = model.predict_proba(X)[:, 1]
+
+    df["score"] = probs.mean(axis=1)
+
+    submission = df[["airport", "airport_alert_id", "date", "score"]].copy()
+    submission["predicted_date_end_alert"] = submission["date"]
+    submission["airport_alert_id"] = submission["airport_alert_id"].astype(int)
+    submission = submission.rename(columns={"date": "prediction_date", "score": "confidence"})
+    submission = submission[[
+        "airport", "airport_alert_id",
+        "prediction_date", "predicted_date_end_alert", "confidence",
+    ]]
+
+    if output_path is not None:
+        submission.to_csv(output_path, index=False)
+
+    return submission
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CLI
 # ─────────────────────────────────────────────────────────────────────────────
 

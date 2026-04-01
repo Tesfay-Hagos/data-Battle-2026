@@ -211,13 +211,8 @@ with tabs[2]:
 
 # ── Tab 4: Live Prediction ────────────────────────────────────────────────────
 with tabs[3]:
-    st.subheader("Live Prediction — Upload Test CSV")
-    st.markdown("""
-    Upload a test CSV with the same columns as the training data
-    (without `is_last_lightning_cloud_ground`).
-    The app loads the 5 trained LightGBM fold models, runs ensemble prediction,
-    and returns a `predictions.csv` ready for submission.
-    """)
+    sys.path.insert(0, str(ROOT / "src"))
+    from predict import predict, predict_from_df  # noqa: PLC0415
 
     models = load_fold_models()
     if models is None:
@@ -226,9 +221,241 @@ with tabs[3]:
             "Run `make train` first, then reload this page."
         )
     else:
-        st.success(f"✅ {len(models)} fold models loaded and ready.")
         threshold = load_threshold()
-        st.caption(f"Decision threshold: **{threshold:.4f}** (from `outputs/saves/threshold_best.txt`)")
+
+        # ── Interactive simulation ────────────────────────────────────────────
+        st.subheader("Real-Time Storm Simulation")
+        st.markdown(
+            "Simulate what the model sees as strikes arrive one by one during a live storm. "
+            "Choose a dataset, airport, and storm alert, then drag the slider to send the first "
+            "**N** time-ordered strikes and watch the model's confidence evolve."
+        )
+
+        DATASET_DIR  = ROOT / "dataset_test"
+        DEFAULT_TEST = DATASET_DIR / "dataset_set.csv"
+        DATASET_DIR.mkdir(exist_ok=True)
+
+        # ── Dataset selector ─────────────────────────────────────────────────
+        available_csvs = sorted(DATASET_DIR.glob("*.csv"))
+        csv_labels = {p.name: p for p in available_csvs}
+        if not csv_labels:
+            st.warning("No CSV files found in `dataset_test/`. Add a CSV file there.")
+            st.stop()
+
+        # Default to dataset_set.csv if present, else first available
+        default_name = DEFAULT_TEST.name if DEFAULT_TEST.name in csv_labels else list(csv_labels)[0]
+        sel_csv_name = st.selectbox(
+            "Step 1 — Select test dataset",
+            list(csv_labels.keys()),
+            index=list(csv_labels.keys()).index(default_name),
+            key="sim_dataset",
+        )
+        sel_csv_path = csv_labels[sel_csv_name]
+
+        @st.cache_data(show_spinner="Loading dataset…")
+        def _load_full(path: str) -> pd.DataFrame:
+            return pd.read_csv(path, parse_dates=["date"])
+
+        df_full = _load_full(str(sel_csv_path))
+        df_demo = df_full[df_full["airport_alert_id"].notna() & (df_full["icloud"] == False)].copy()
+        has_labels = (
+            "is_last_lightning_cloud_ground" in df_full.columns and
+            df_full["is_last_lightning_cloud_ground"].map(
+                {True: True, "True": True, 1: True}
+            ).any()
+        )
+
+        airports_avail = sorted(df_demo["airport"].dropna().unique().tolist())
+        if not airports_avail:
+            st.error("No inside-zone CG strikes found in this dataset. Check the file format.")
+            st.stop()
+
+        sel_airport = st.selectbox("Step 2 — Select airport", airports_avail, key="sim_airport")
+
+        # Segments for this airport — label includes strike count and duration
+        segs = (
+            df_demo[df_demo["airport"] == sel_airport]
+            .groupby("airport_alert_id")["date"]
+            .agg(["count", "min", "max"])
+            .reset_index()
+            .rename(columns={"count": "n_strikes", "min": "first", "max": "last"})
+            .sort_values("airport_alert_id")
+        )
+        segs["duration_min"] = (segs["last"] - segs["first"]).dt.total_seconds() / 60
+        segs["label"] = segs.apply(
+            lambda r: f"Alert #{int(r['airport_alert_id'])} — {int(r['n_strikes'])} strikes, "
+                      f"{r['duration_min']:.0f} min",
+            axis=1,
+        )
+
+        sel_label = st.selectbox("Step 3 — Select storm segment", segs["label"].tolist(), key="sim_seg")
+        sel_row   = segs[segs["label"] == sel_label].iloc[0]
+        sel_alert = int(sel_row["airport_alert_id"])
+        total_n   = int(sel_row["n_strikes"])
+
+        n_strikes = st.slider(
+            f"Step 4 — Send first N strikes  (segment has {total_n} total)",
+            min_value=1, max_value=total_n, value=total_n, key="sim_n",
+        )
+
+        if st.button("▶ Run Simulation", type="primary", key="sim_run"):
+            with st.spinner("Building features and running ensemble…"):
+                try:
+                    # Build input: all rows EXCEPT selected segment's inside rows,
+                    # plus the first N time-ordered strikes from the selected segment.
+                    seg_all = df_full[
+                        (df_full["airport"] == sel_airport) &
+                        (df_full["airport_alert_id"] == sel_alert)
+                    ].sort_values("date")
+                    seg_sent = seg_all.head(n_strikes)
+                    seg_remaining = seg_all.iloc[n_strikes:]
+
+                    df_base = df_full[
+                        ~((df_full["airport"] == sel_airport) &
+                          (df_full["airport_alert_id"] == sel_alert))
+                    ]
+                    df_input = pd.concat([df_base, seg_sent], ignore_index=True)
+
+                    result = predict_from_df(df_input)
+                    result_seg = result[
+                        (result["airport"] == sel_airport) &
+                        (result["airport_alert_id"] == sel_alert)
+                    ].sort_values("prediction_date").reset_index(drop=True)
+
+                    if len(result_seg) == 0:
+                        st.error("No predictions returned for this segment. Check that models are trained.")
+                    else:
+                        max_conf  = result_seg["confidence"].max()
+                        above_thr = result_seg["confidence"] >= threshold
+                        all_clear = above_thr.any()
+
+                        # ── Summary metrics ──────────────────────────────────
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Strikes sent", f"{n_strikes} / {total_n}")
+                        c2.metric("Highest confidence", f"{max_conf:.1%}")
+                        c3.metric(
+                            "Model decision",
+                            "✅ All-clear predicted" if all_clear else "⚠️ Storm ongoing",
+                        )
+
+                        # ── Strike-by-strike table ───────────────────────────
+                        st.markdown("#### Strike-by-strike predictions")
+
+                        # Merge in original amplitude and dist from sent rows
+                        sent_meta = (
+                            seg_sent[["date", "dist", "amplitude"]]
+                            .reset_index(drop=True)
+                            .rename(columns={"date": "prediction_date"})
+                        )
+                        result_seg = result_seg.merge(
+                            sent_meta, on="prediction_date", how="left"
+                        )
+
+                        result_seg.insert(0, "#", range(1, len(result_seg) + 1))
+                        result_seg["Time"] = result_seg["prediction_date"].dt.strftime("%H:%M:%S")
+                        result_seg["Dist (km)"] = result_seg["dist"].round(1)
+                        result_seg["Amplitude"] = result_seg["amplitude"].round(0)
+                        result_seg["P(last strike)"] = result_seg["confidence"]
+                        result_seg["Decision"] = result_seg["confidence"].apply(
+                            lambda p: "✅ All-clear" if p >= threshold else "—"
+                        )
+
+                        st.dataframe(
+                            result_seg[["#", "Time", "Dist (km)", "Amplitude",
+                                        "P(last strike)", "Decision"]],
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "P(last strike)": st.column_config.ProgressColumn(
+                                    min_value=0, max_value=1, format="%.1%%",
+                                ),
+                            },
+                        )
+
+                        # ── Timeline chart ───────────────────────────────────
+                        st.markdown("#### Confidence timeline")
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(
+                            x=list(range(1, len(result_seg) + 1)),
+                            y=result_seg["confidence"].tolist(),
+                            name="Sent strikes",
+                            marker_color=[
+                                "#27AE60" if p >= threshold else "#2980B9"
+                                for p in result_seg["confidence"]
+                            ],
+                        ))
+                        if len(seg_remaining) > 0:
+                            fig.add_trace(go.Bar(
+                                x=list(range(len(result_seg) + 1,
+                                             len(result_seg) + len(seg_remaining) + 1)),
+                                y=[0] * len(seg_remaining),
+                                name="Hidden (not sent)",
+                                marker_color="#BDC3C7",
+                                opacity=0.5,
+                            ))
+                        fig.add_hline(
+                            y=threshold, line_dash="dash", line_color="orange",
+                            annotation_text=f"Threshold {threshold:.2f}",
+                            annotation_position="top right",
+                        )
+                        fig.update_layout(
+                            xaxis_title="Strike # (time order)",
+                            yaxis_title="P(last strike)",
+                            yaxis_range=[0, 1],
+                            height=300,
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                            bargap=0.15,
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # ── Ground truth reveal (only if labels exist) ───────
+                        if has_labels:
+                            with st.expander("📋 Ground truth reveal"):
+                                seg_reset = seg_all.reset_index(drop=True)
+                                true_last_pos = seg_reset.index[
+                                    seg_reset["is_last_lightning_cloud_ground"].map(
+                                        {True: True, "True": True, 1: True}
+                                    ).fillna(False)
+                                ].tolist()
+                                true_pos_1idx = [p + 1 for p in true_last_pos]
+
+                                if true_pos_1idx:
+                                    st.markdown(
+                                        f"**True last strike:** #{true_pos_1idx[-1]} of {total_n}"
+                                    )
+                                    if n_strikes < total_n:
+                                        st.markdown(
+                                            f"The segment had **{total_n - n_strikes} more strikes** "
+                                            f"after your cut-off (shown below)."
+                                        )
+                                        rem_display = seg_remaining[["date", "dist", "amplitude"]].copy()
+                                        rem_display.insert(0, "#", range(n_strikes + 1, total_n + 1))
+                                        rem_display = rem_display.rename(columns={
+                                            "date": "Time", "dist": "Dist (km)", "amplitude": "Amplitude"
+                                        })
+                                        st.dataframe(rem_display, use_container_width=True, hide_index=True)
+                                    else:
+                                        st.markdown("You sent all strikes in the segment.")
+                                else:
+                                    st.markdown("No ground-truth label found for this segment.")
+                        else:
+                            st.caption("Ground truth not available for this dataset (competition test set).")
+
+                except Exception as exc:
+                    st.error(f"Simulation failed: {exc}")
+                    st.exception(exc)
+
+        st.markdown("---")
+
+        # ── Batch upload (kept for submission use) ────────────────────────────
+        st.subheader("Batch prediction — upload your own CSV")
+        st.markdown(
+            "Upload a full test CSV (same schema as training data, no target column) "
+            "to generate a submission-ready predictions file.  "
+            "Uploaded files are also saved to `dataset_test/` and will appear in the simulator dropdown above."
+        )
+        st.success(f"✅ {len(models)} fold models loaded.  Decision threshold: **{threshold:.4f}**")
 
         uploaded = st.file_uploader(
             "Choose test CSV",
@@ -239,23 +466,24 @@ with tabs[3]:
         if uploaded is not None:
             st.markdown(f"**Uploaded:** `{uploaded.name}`  ({uploaded.size / 1024:.1f} KB)")
 
-            if st.button("Run prediction", type="primary"):
+            if st.button("Run prediction", type="primary", key="batch_run"):
                 with st.spinner("Building features and running ensemble prediction…"):
                     try:
-                        sys.path.insert(0, str(ROOT / "src"))
-                        from predict import predict  # noqa: PLC0415
+                        # Save to dataset_test/ so it appears in the simulator
+                        upload_save_path = DATASET_DIR / uploaded.name
+                        file_bytes = uploaded.read()
+                        upload_save_path.write_bytes(file_bytes)
 
-                        # Save upload to a temp file
                         with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
-                            tmp.write(uploaded.read())
+                            tmp.write(file_bytes)
                             tmp_path = tmp.name
 
                         out_path = SAVES_DIR / "predictions_upload.csv"
                         df_pred = predict(tmp_path, out_path)
                         os.unlink(tmp_path)
+                        st.info(f"💾 Saved to `dataset_test/{uploaded.name}` — available in simulator.")
 
                         st.success(f"✅ Generated **{len(df_pred):,}** predictions.")
-
                         st.dataframe(df_pred.head(20), use_container_width=True, hide_index=True)
 
                         csv_bytes = df_pred.to_csv(index=False).encode("utf-8")
@@ -269,16 +497,3 @@ with tabs[3]:
                     except Exception as exc:
                         st.error(f"Prediction failed: {exc}")
                         st.exception(exc)
-
-    st.markdown("---")
-    st.markdown("""
-    **Expected output columns**
-
-    | Column | Description |
-    |--------|-------------|
-    | `airport` | Airport name |
-    | `airport_alert_id` | Alert identifier |
-    | `prediction_date` | Timestamp of the predicted last strike |
-    | `predicted_date_end_alert` | Predicted end time of the alert |
-    | `confidence` | Model probability (0–1) |
-    """)
