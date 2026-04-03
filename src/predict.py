@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from codecarbon import EmissionsTracker
 
 ROOT = Path(os.environ["DATABATTLE_ROOT"]) if "DATABATTLE_ROOT" in os.environ \
        else Path(__file__).resolve().parent.parent
@@ -28,9 +29,11 @@ from features import FEATURE_COLS, build_all_features  # noqa: E402
 MODELS_DIR   = ROOT / "outputs" / "models"
 SAVES_DIR    = ROOT / "outputs" / "saves"
 SUBMISSIONS  = ROOT / "outputs" / "submissions"
+LOGS_DIR     = ROOT / "outputs" / "logs"
 TRAIN_DATA   = ROOT / "data" / "segment_alerts_all_airports_train.csv"
 
 SUBMISSIONS.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -102,6 +105,16 @@ def predict(test_path: str | Path, output_path: str | Path) -> pd.DataFrame:
     print("DataBattle 2026 — Inference")
     print("=" * 72)
 
+    # ── Carbon tracking — start ───────────────────────────────────────────────
+    tracker = EmissionsTracker(
+        project_name="databattle2026-inference",
+        output_dir=str(LOGS_DIR),
+        output_file="carbon_report_inference.csv",
+        log_level="error",
+        save_to_file=True,
+    )
+    tracker.start()
+
     # ── 1. Load test data and build features ──────────────────────────────────
     print(f"\n📂 Loading test data: {test_path}")
     df_raw = pd.read_csv(test_path, sep=None, engine="python", on_bad_lines="skip")
@@ -134,6 +147,17 @@ def predict(test_path: str | Path, output_path: str | Path) -> pd.DataFrame:
         print(f"   Fold {i}/{len(models)} done")
 
     df["score"] = probs.mean(axis=1)
+
+    # ── Carbon tracking — stop ────────────────────────────────────────────────
+    emissions_kg = tracker.stop()
+    print("\n🌱 Inference carbon footprint:")
+    if emissions_kg is not None:
+        kwh = emissions_kg / 0.233
+        print(f"   CO₂ equivalent : {emissions_kg * 1000:.4f} g")
+        print(f"   Energy         : {kwh * 1000:.4f} Wh")
+        print(f"   Report saved   : {LOGS_DIR / 'carbon_report_inference.csv'}")
+    else:
+        print("   ⚠️  CodeCarbon did not return an emissions value")
 
     # ── 5. Build submission in evaluation protocol format ─────────────────────
     # Format required by Evaluation_databattle_meteorage.ipynb:

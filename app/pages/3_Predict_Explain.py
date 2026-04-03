@@ -293,30 +293,15 @@ with tabs[3]:
         sel_alert = int(sel_row["airport_alert_id"])
         total_n   = int(sel_row["n_strikes"])
 
-        n_strikes = st.slider(
-            f"Step 4 — Send first N strikes  (segment has {total_n} total)",
-            min_value=1, max_value=total_n, value=total_n, key="sim_n",
-        )
-
-        if st.button("▶ Run Simulation", type="primary", key="sim_run"):
+        if st.button("⚡ Predict", type="primary", key="sim_run"):
             with st.spinner("Building features and running ensemble…"):
                 try:
-                    # Build input: all rows EXCEPT selected segment's inside rows,
-                    # plus the first N time-ordered strikes from the selected segment.
                     seg_all = df_full[
                         (df_full["airport"] == sel_airport) &
                         (df_full["airport_alert_id"] == sel_alert)
-                    ].sort_values("date")
-                    seg_sent = seg_all.head(n_strikes)
-                    seg_remaining = seg_all.iloc[n_strikes:]
+                    ].sort_values("date").reset_index(drop=True)
 
-                    df_base = df_full[
-                        ~((df_full["airport"] == sel_airport) &
-                          (df_full["airport_alert_id"] == sel_alert))
-                    ]
-                    df_input = pd.concat([df_base, seg_sent], ignore_index=True)
-
-                    result = predict_from_df(df_input)
+                    result = predict_from_df(df_full)
                     result_seg = result[
                         (result["airport"] == sel_airport) &
                         (result["airport_alert_id"] == sel_alert)
@@ -331,33 +316,29 @@ with tabs[3]:
 
                         # ── Summary metrics ──────────────────────────────────
                         c1, c2, c3 = st.columns(3)
-                        c1.metric("Strikes sent", f"{n_strikes} / {total_n}")
+                        c1.metric("Total strikes", total_n)
                         c2.metric("Highest confidence", f"{max_conf:.1%}")
                         c3.metric(
-                            "Model decision",
-                            "✅ All-clear predicted" if all_clear else "⚠️ Storm ongoing",
+                            "Zone status",
+                            "🟢 Safe to reopen" if all_clear else "🔴 Danger — stay closed",
                         )
 
                         # ── Strike-by-strike table ───────────────────────────
                         st.markdown("#### Strike-by-strike predictions")
 
-                        # Merge in original amplitude and dist from sent rows
-                        sent_meta = (
-                            seg_sent[["date", "dist", "amplitude"]]
-                            .reset_index(drop=True)
+                        seg_meta = (
+                            seg_all[["date", "dist", "amplitude"]]
                             .rename(columns={"date": "prediction_date"})
                         )
-                        result_seg = result_seg.merge(
-                            sent_meta, on="prediction_date", how="left"
-                        )
+                        result_seg = result_seg.merge(seg_meta, on="prediction_date", how="left")
 
                         result_seg.insert(0, "#", range(1, len(result_seg) + 1))
-                        result_seg["Time"] = result_seg["prediction_date"].dt.strftime("%H:%M:%S")
-                        result_seg["Dist (km)"] = result_seg["dist"].round(1)
-                        result_seg["Amplitude"] = result_seg["amplitude"].round(0)
+                        result_seg["Time"]         = result_seg["prediction_date"].dt.strftime("%H:%M:%S")
+                        result_seg["Dist (km)"]    = result_seg["dist"].round(1)
+                        result_seg["Amplitude"]    = result_seg["amplitude"].round(0)
                         result_seg["P(last strike)"] = result_seg["confidence"]
-                        result_seg["Decision"] = result_seg["confidence"].apply(
-                            lambda p: "✅ All-clear" if p >= threshold else "—"
+                        result_seg["Decision"]     = result_seg["confidence"].apply(
+                            lambda p: "🟢 Safe" if p >= threshold else "—"
                         )
 
                         st.dataframe(
@@ -372,27 +353,18 @@ with tabs[3]:
                             },
                         )
 
-                        # ── Timeline chart ───────────────────────────────────
+                        # ── Confidence timeline ──────────────────────────────
                         st.markdown("#### Confidence timeline")
                         fig = go.Figure()
                         fig.add_trace(go.Bar(
                             x=list(range(1, len(result_seg) + 1)),
                             y=result_seg["confidence"].tolist(),
-                            name="Sent strikes",
                             marker_color=[
                                 "#27AE60" if p >= threshold else "#2980B9"
                                 for p in result_seg["confidence"]
                             ],
+                            showlegend=False,
                         ))
-                        if len(seg_remaining) > 0:
-                            fig.add_trace(go.Bar(
-                                x=list(range(len(result_seg) + 1,
-                                             len(result_seg) + len(seg_remaining) + 1)),
-                                y=[0] * len(seg_remaining),
-                                name="Hidden (not sent)",
-                                marker_color="#BDC3C7",
-                                opacity=0.5,
-                            ))
                         fig.add_hline(
                             y=threshold, line_dash="dash", line_color="orange",
                             annotation_text=f"Threshold {threshold:.2f}",
@@ -403,40 +375,27 @@ with tabs[3]:
                             yaxis_title="P(last strike)",
                             yaxis_range=[0, 1],
                             height=300,
-                            showlegend=True,
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02),
                             bargap=0.15,
                         )
                         st.plotly_chart(fig, use_container_width=True)
 
-                        # ── Ground truth reveal (only if labels exist) ───────
+                        # ── Ground truth (only if labels exist) ──────────────
                         if has_labels:
-                            with st.expander("📋 Ground truth reveal"):
+                            with st.expander("📋 Ground truth"):
                                 seg_reset = seg_all.reset_index(drop=True)
                                 true_last_pos = seg_reset.index[
                                     seg_reset["is_last_lightning_cloud_ground"].map(
                                         {True: True, "True": True, 1: True}
                                     ).fillna(False)
                                 ].tolist()
-                                true_pos_1idx = [p + 1 for p in true_last_pos]
-
-                                if true_pos_1idx:
-                                    st.markdown(
-                                        f"**True last strike:** #{true_pos_1idx[-1]} of {total_n}"
-                                    )
-                                    if n_strikes < total_n:
-                                        st.markdown(
-                                            f"The segment had **{total_n - n_strikes} more strikes** "
-                                            f"after your cut-off (shown below)."
-                                        )
-                                        rem_display = seg_remaining[["date", "dist", "amplitude"]].copy()
-                                        rem_display.insert(0, "#", range(n_strikes + 1, total_n + 1))
-                                        rem_display = rem_display.rename(columns={
-                                            "date": "Time", "dist": "Dist (km)", "amplitude": "Amplitude"
-                                        })
-                                        st.dataframe(rem_display, use_container_width=True, hide_index=True)
-                                    else:
-                                        st.markdown("You sent all strikes in the segment.")
+                                if true_last_pos:
+                                    true_1idx = true_last_pos[-1] + 1
+                                    model_1idx = int(result_seg["confidence"].idxmax()) + 1
+                                    st.markdown(f"**True last strike:** #{true_1idx} of {total_n}")
+                                    st.markdown(f"**Model highest confidence:** strike #{model_1idx}")
+                                    correct = (true_1idx == model_1idx)
+                                    st.markdown("✅ Model correctly identified the last strike!" if correct
+                                                else f"Model predicted #{model_1idx}, true last was #{true_1idx}")
                                 else:
                                     st.markdown("No ground-truth label found for this segment.")
                         else:
