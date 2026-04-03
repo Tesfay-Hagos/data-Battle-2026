@@ -19,6 +19,7 @@ Function call order in build_all_features (dependencies matter):
   add_lag_features         → D: needed by F (threshold), G (interaction)
   add_cartesian_features   → E: storm movement speed
   add_rolling_features     → E: recent activity rate (time-windowed)
+  add_count_rolling_features→ E2: count-based rolling + exponential decay
   add_threshold_features   → F: needs D (time_since_prev)
   add_interaction_features → G: needs B, D, F
   add_outer_ring_features  → K: needs df_outside (separate argument)
@@ -261,6 +262,53 @@ def add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_count_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    E2 — Count-based rolling windows (last N strikes, not time-based).
+
+    Complements time-based windows: for fast storms with many strikes in
+    10 min, a count window still captures short-range dynamics.
+
+    rolling_max_mag_5strikes  : peak intensity in last 5 strikes — high peak
+                                 early in window signals storm still strong
+    rolling_mean_mag_5strikes : recent mean intensity (count-based)
+    rolling_mean_dist_5strikes: recent mean distance (count-based)
+    exp_decay_mag             : exponentially decayed amplitude magnitude
+                                 (decay factor α=0.5 per strike) — weights
+                                 most recent strike heaviest
+    exp_decay_dist            : exponentially decayed distance
+
+    All windows use min_periods=1 so the first strike is never NaN.
+    Requires df sorted by [segment_key, date].
+    """
+    alpha = 0.5  # exponential decay factor per strike
+
+    grp = df.groupby("segment_key", sort=False)
+
+    df["rolling_max_mag_5strikes"]  = (
+        grp["amp_magnitude"].transform(lambda x: x.rolling(5, min_periods=1).max())
+    )
+    df["rolling_mean_mag_5strikes"] = (
+        grp["amp_magnitude"].transform(lambda x: x.rolling(5, min_periods=1).mean())
+    )
+    df["rolling_mean_dist_5strikes"] = (
+        grp["dist"].transform(lambda x: x.rolling(5, min_periods=1).mean())
+    )
+
+    # Exponential weighted mean — pandas ewm is causal by default (adjust=False)
+    df["exp_decay_mag"] = (
+        grp["amp_magnitude"].transform(
+            lambda x: x.ewm(alpha=alpha, adjust=False).mean()
+        )
+    )
+    df["exp_decay_dist"] = (
+        grp["dist"].transform(
+            lambda x: x.ewm(alpha=alpha, adjust=False).mean()
+        )
+    )
+    return df
+
+
 def add_threshold_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     F — Binary regime-change indicators based on inter-strike silence.
@@ -282,8 +330,9 @@ def add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
 
     silence_x_dist_away : long silence (>15 min) AND storm moving away.
                           = 1 only when both conditions hold → strongest end signal.
-    weak_and_moving_away: below-average amplitude AND increasing distance.
-                          = 1 when storm is both weak and receding.
+    weak_and_moving_away: below running-mean amplitude AND increasing distance.
+                          = 1 when storm is both weak (relative to its own history)
+                          and receding. Uses causal seg_mean_mag (running mean).
 
     Requires: silence_over_15min (F), dist_delta (D), amp_magnitude + seg_mean_mag (A, B).
     """
@@ -335,7 +384,7 @@ def add_outer_ring_features(
 
     outer_agg = (
         df_outside_cg
-        .groupby("airport", group_keys=False)
+        .groupby("airport", group_keys=False)[["airport", "date", "amplitude"]]
         .apply(_rolling_count)
         .sort_values("date")
         .reset_index(drop=True)
